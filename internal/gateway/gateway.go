@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"opencode2api/internal/config"
+	"opencode2api/internal/httpx"
 	"opencode2api/internal/identity"
 	"opencode2api/internal/jsonutil"
 	"opencode2api/internal/models"
@@ -242,10 +243,32 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			}
 			return
 		}
-		responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		// A non-streaming reply needs the whole upstream body before anything
+		// can be written downstream, so a provider that accepts a request and
+		// then drops the connection mid-body would otherwise fail the client
+		// for work it already started.
+		responseBody, upstreamRoute, err := g.readNonStreamingBody(requestCtx, route, bodies, ids, resp, upstreamRoute)
 		if err != nil {
+			// A read that fails because the caller went away is not a gateway
+			// fault: the upstream answer was on its way and nobody is left to
+			// receive it. Recording that as a 502 made client timeouts look
+			// like server failures and sent diagnosis hunting for an upstream
+			// problem that did not exist.
+			if wire.ClientCanceled(r.Context(), err) {
+				if meta != nil {
+					meta.Outcome = "client_canceled"
+				}
+				writeClientClosed(w, external, ids.Request)
+				return
+			}
 			wire.WriteError(w, external, http.StatusBadGateway, "failed to read upstream response", "upstream_error", ids.Request)
 			return
+		}
+		if meta != nil {
+			// The repeated round trip may have landed on a different tier, so
+			// the outcome has to be re-read from the route that answered.
+			meta.Tier = string(upstreamRoute.Tier)
+			meta.Protocol = upstreamRoute.Protocol
 		}
 		if upstreamRoute.Anonymous || (meta != nil && meta.Shaped) {
 			// Key-tier shaped requests were force-streamed like the
@@ -275,6 +298,57 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(responseBody)
+	}
+}
+
+// upstreamBodyRetries bounds how many extra round trips a non-streaming
+// request gets when the provider accepts it and then drops the connection
+// before the body completes.
+const upstreamBodyRetries = 1
+
+// statusClientClosedRequest is the conventional code for a request the client
+// abandoned before the response was ready. It is not in the HTTP spec, so the
+// standard library does not name it.
+const statusClientClosedRequest = 499
+
+// writeClientClosed records a request the client abandoned. The connection is
+// already gone, so this exists to keep the recorded status honest rather than
+// to deliver anything.
+func writeClientClosed(w http.ResponseWriter, protocol wire.Protocol, requestID string) {
+	wire.WriteError(w, protocol, statusClientClosedRequest, "client closed the request before the response was ready", "client_canceled", requestID)
+}
+
+// readNonStreamingBody returns the complete body of an upstream response that
+// has already answered 2xx. A truncated read means the provider started the
+// work and then lost the connection, which the attempt loop cannot recover
+// from because that loop already saw a success and returned. The whole round
+// trip is therefore repeated, bounded by upstreamBodyRetries and by the
+// request budget: a second generation cannot finish once the budget is gone.
+//
+// The caller owns the response it passes in. Any response this function starts
+// itself is closed on every path, including the one that returns its body.
+func (g *Gateway) readNonStreamingBody(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, resp *http.Response, upstreamRoute models.Route) ([]byte, models.Route, error) {
+	for attempt := 0; ; attempt++ {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		if err == nil {
+			return body, upstreamRoute, nil
+		}
+		httpx.DrainAndClose(resp.Body)
+		if attempt >= upstreamBodyRetries || ctx.Err() != nil {
+			return nil, upstreamRoute, err
+		}
+		g.logger.Warn("upstream dropped the response body; repeating the round trip",
+			"component", "upstream", "event", "upstream_body_retry",
+			"request_id", ids.Request, "model", route.ID, "tier", string(upstreamRoute.Tier),
+			"attempt", attempt+1, "error", err)
+		retryResp, retryRoute, retryErr := g.doUpstream(ctx, route, bodies, ids)
+		if retryErr != nil || retryResp == nil || retryResp.StatusCode/100 != 2 {
+			if retryResp != nil {
+				httpx.DrainAndClose(retryResp.Body)
+			}
+			return nil, upstreamRoute, err
+		}
+		resp, upstreamRoute = retryResp, retryRoute
 	}
 }
 
