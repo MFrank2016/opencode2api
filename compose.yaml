@@ -1,7 +1,21 @@
 services:
   opencode2api:
-    image: ghcr.io/jasonxu114514/opencode2api:${OPENCODE2API_VERSION:-latest}
-    pull_policy: always
+    # Built from this checkout rather than pulled from ghcr.io, so local changes
+    # to the gateway ship without publishing an image first.
+    #
+    # Tag every build with the source it came from, otherwise a locally built
+    # image cannot be traced back to a commit:
+    #
+    #   OPENCODE2API_VERSION=$(git describe --always --dirty) \
+    #     docker compose up -d --build
+    #
+    # The bare "local" default is only a fallback for a throwaway build.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${OPENCODE2API_VERSION:-local}
+    image: opencode2api:${OPENCODE2API_VERSION:-local}
     restart: unless-stopped
     read_only: true
     security_opt:
@@ -14,8 +28,10 @@ services:
       LISTEN_ADDRESS: ${OPENCODE2API_LISTEN:-}
       WEBUI_LISTEN_ADDRESS: ${OPENCODE2API_WEBUI_LISTEN:-}
     ports:
-      - "${OPENCODE2API_PORT:-8080}:8080"
-      - "${OPENCODE2API_WEBUI_PORT:-8081}:8081"
+      # API now served via https://opencode.061995.xyz (Caddy); bind localhost only
+      - "127.0.0.1:${OPENCODE2API_PORT:-8080}:8080"
+      # WebUI now served via https://opencodeui.061995.xyz (Caddy); bind localhost only
+      - "127.0.0.1:${OPENCODE2API_WEBUI_PORT:-8081}:8081"
     configs:
       - source: opencode2api_config
         target: /run/config/opencode2api.json
