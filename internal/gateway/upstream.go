@@ -344,11 +344,11 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 var anonymousCoreTools = []string{"bash", "edit", "glob", "grep", "read"}
 
 // prepareAnonymousBody returns a copy of body normalized for the anonymous
-// free tier: streaming enabled plus the core agent tools present. Bodies
-// that already satisfy both (or are not JSON objects) are returned
-// unchanged. System One payloads are decision requests, not agent traffic, so
-// they are forwarded verbatim; injecting streaming or tool definitions would
-// make the upstream reject them.
+// free tier: streaming enabled, the core agent tools present, and an output
+// budget at or above the tier's floor. Bodies that already satisfy all of them
+// (or are not JSON objects) are returned unchanged. System One payloads are
+// decision requests, not agent traffic, so they are forwarded verbatim;
+// injecting streaming or tool definitions would make the upstream reject them.
 func prepareAnonymousBody(body []byte, protocol wire.Protocol) []byte {
 	if protocol == wire.SystemOne {
 		return body
@@ -366,6 +366,9 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol) []byte {
 		changed = true
 	}
 	if ensureAnonymousTools(payload, protocol) {
+		changed = true
+	}
+	if ensureAnonymousTokenFloor(payload, protocol) {
 		changed = true
 	}
 	if !changed {
@@ -429,6 +432,44 @@ func ensureAnonymousTools(payload map[string]any, protocol wire.Protocol) bool {
 	}
 	payload["tools"] = append(items, anonymousToolset(protocol, missing)...)
 	return true
+}
+
+// anonymousMinOutputTokens is the smallest output budget the free tier
+// accepts. Upstream answers a smaller one with a 400 that names
+// max_output_tokens ("The number must be >= 16"), so the gateway lifts a
+// below-floor client value instead of forwarding a request that cannot succeed.
+const anonymousMinOutputTokens = 16
+
+// ensureAnonymousTokenFloor lifts an output budget that is present but below
+// the free-tier floor up to that floor. It reports whether the payload
+// changed. A budget the client omitted is left alone: that means "unlimited",
+// not "too small", and the encoders only write the field when one was stated.
+func ensureAnonymousTokenFloor(payload map[string]any, protocol wire.Protocol) bool {
+	field := anonymousTokenField(protocol)
+	if field == "" {
+		return false
+	}
+	if jsonutil.AnyAt(payload, field) == nil {
+		return false
+	}
+	if jsonutil.IntAt(payload, field) >= anonymousMinOutputTokens {
+		return false
+	}
+	payload[field] = anonymousMinOutputTokens
+	return true
+}
+
+// anonymousTokenField names the output-budget field each upstream protocol
+// encodes, mirroring the writers in the protocol package.
+func anonymousTokenField(protocol wire.Protocol) string {
+	switch protocol {
+	case wire.Responses:
+		return "max_output_tokens"
+	case wire.Chat, wire.Anthropic:
+		return "max_tokens"
+	default:
+		return ""
+	}
 }
 
 func anonymousToolName(protocol wire.Protocol, item any) string {
