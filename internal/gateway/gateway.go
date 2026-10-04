@@ -230,7 +230,7 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		if upstreamRoute.Anonymous || (meta != nil && meta.Shaped) {
 			// Key-tier shaped requests were force-streamed like the
 			// anonymous lane; collapse the same way.
-			// The anonymous lane is served streaming (see forceStreamBody);
+			// The anonymous lane is served streaming (see prepareAnonymousBody);
 			// collapse the events back into the single document this
 			// non-streaming client asked for.
 			collapsed, err := wire.CollapseStream(bytes.NewReader(responseBody), upstreamRoute.Protocol, model)

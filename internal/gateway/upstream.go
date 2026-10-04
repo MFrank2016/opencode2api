@@ -469,24 +469,6 @@ func anonymousTool(protocol wire.Protocol, name string) map[string]any {
 	}
 }
 
-// forceStreamBody returns a copy of body with streaming enabled. Bodies
-// that already stream (or are not JSON objects) are returned unchanged.
-func forceStreamBody(body []byte) []byte {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return body
-	}
-	if streaming, ok := payload["stream"].(bool); ok && streaming {
-		return body
-	}
-	payload["stream"] = true
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return body
-	}
-	return encoded
-}
-
 // requestBodyDumpLimit caps how much of an outbound body is written to the log.
 const requestBodyDumpLimit = 64 << 10
 
