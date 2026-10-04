@@ -401,6 +401,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 				// preferred tier. Do not reject a request before the preferred
 				// upstream has even been tried; that tier is attempted only if
 				// the request actually falls back.
+				g.logger.Debug("skipping fallback tier with incompatible request shape", "component", "conversion", "event", "fallback_tier_skipped", "model", jsonutil.StringAt(input, "model"), "tier", tier, "protocol", protocol, "error", err)
 				continue
 			}
 			return nil, fmt.Errorf("prepare %s upstream request: %w", tier, err)
