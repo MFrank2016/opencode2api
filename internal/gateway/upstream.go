@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -767,6 +768,25 @@ func (g *Gateway) recordUpstreamAttempt(ctx context.Context, route models.Route,
 	if meta := telemetry.MetaFromContext(ctx); meta != nil {
 		meta.AttemptOutcome = outcome
 		meta.Protocol = route.Protocol
+		// Append a per-attempt leg (key:status:ms, anonymized for the
+		// public lane) so the request log shows the whole attempt chain
+		// at a glance. Only the redacted key suffix is retained.
+		label := keyID
+		if anonymous {
+			label = "anon"
+		}
+		leg := label + ":"
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				leg += "timeout"
+			} else {
+				leg += "transport"
+			}
+		} else {
+			leg += strconv.Itoa(status)
+		}
+		leg += ":" + strconv.FormatInt(max(duration.Milliseconds(), 0), 10) + "ms"
+		meta.Legs = append(meta.Legs, leg)
 	}
 	if g.monitor == nil {
 		return
