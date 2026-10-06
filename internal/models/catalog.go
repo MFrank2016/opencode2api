@@ -451,12 +451,34 @@ func (c *Catalog) Supported(model string) bool {
 // the tier that will actually serve the request. Same-named models can carry
 // different limits per tier, so callers must pass route.Tier — never a
 // tier-blind lookup. Anonymous routes always resolve to TierZen, which keeps
-// the keyless path on Zen metadata. The zero value is returned for models
-// the catalog does not describe (or before the first capability refresh).
+// the keyless path on Zen metadata. Limits the catalog omitted are filled from
+// models.dev; capability flags always come from the catalog. The zero value is
+// returned for models neither source describes (or before the first refresh).
 func (c *Catalog) MetadataForTier(model string, tier config.Tier) Metadata {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.modelMeta[tier][model]
+	md := c.modelMeta[tier][model]
+	pricing := c.pricing
+	c.mu.RUnlock()
+	if pricing == nil {
+		return md
+	}
+	price, ok := pricing.Price(model)
+	if !ok {
+		return md
+	}
+	// OpenCode's capability catalog is authoritative. Use models.dev limits
+	// only to fill fields it omitted so discovery clients still get per-model
+	// context and output limits.
+	if md.ContextWindow == 0 {
+		md.ContextWindow = price.ContextWindow
+	}
+	if md.MaxInput == 0 {
+		md.MaxInput = price.MaxInput
+	}
+	if md.MaxOutput == 0 {
+		md.MaxOutput = price.MaxOutput
+	}
+	return md
 }
 
 func (c *Catalog) supportedLocked(model string) bool {
