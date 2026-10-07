@@ -74,6 +74,16 @@ func (g *Gateway) doUpstream(ctx context.Context, route models.Route, bodies map
 	// Restore the body so downstream error handling still sees the original
 	// payload when no retry happens below.
 	resp.Body = io.NopCloser(bytes.NewReader(errBody))
+	// Log a capped snippet of the upstream error body so the 400 class is
+	// visible without dumping full payloads. Bodies stay out of attempt
+	// records; the hub redactor scrubs configured secrets from log output.
+	if len(errBody) > 0 {
+		snippet := string(errBody)
+		if len(snippet) > 240 {
+			snippet = snippet[:240]
+		}
+		g.logger.Info("upstream error returned or retried", "component", "upstream", "event", "upstream_error_body", "request_id", ids.Request, "model", route.ID, "status", resp.StatusCode, "snippet", snippet)
+	}
 	if !isStaleReasoningReference(errBody) {
 		return resp, effectiveRoute, nil
 	}
