@@ -179,7 +179,7 @@ The gateway refreshes Zen/Go `/v1/models` and OpenCode's [capability catalog](ht
 
 Allowed protocol values are `chat`, `responses`, and `anthropic`. Models using unsupported native protocols are filtered from discovery unless overridden.
 
-Cost and deprecation metadata come from [models.dev](https://models.dev/api.json), refreshed every 24 hours. Metadata requests use a 30-second timeout per HTTP client. Refresh failures retain existing data.
+Cost, deprecation, and model limits come from [models.dev](https://models.dev/api.json), refreshed every 24 hours. OpenCode's capability catalog remains authoritative for context and token limits; models.dev `limit.context`, `limit.input`, and `limit.output` fill fields missing from that catalog. These limits are exposed by `/v1/models` as `context_window`/`context_length`, `max_input`, and `max_output` for discovery clients such as CLIProxyAPI and Pi. Metadata requests use a 30-second timeout per HTTP client. Refresh failures retain existing data.
 
 ### Anonymous access and fallback
 
