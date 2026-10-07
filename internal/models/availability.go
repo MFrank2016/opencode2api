@@ -11,14 +11,23 @@ import (
 const FreeModelCheckInterval = time.Hour
 const FailedModelCheckInterval = 24 * time.Hour
 
+type EffortProbe struct {
+	Effort   string `json:"effort,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Reset    bool   `json:"-"`
+}
+
 type Availability struct {
-	Model      string    `json:"model"`
-	Disabled   bool      `json:"disabled"`
-	CheckedAt  time.Time `json:"checked_at,omitempty"`
-	NextCheck  time.Time `json:"next_check"`
-	Reason     string    `json:"reason,omitempty"`
-	Channel    string    `json:"channel,omitempty"`
-	Generation uint64    `json:"-"`
+	Model           string      `json:"model"`
+	Disabled        bool        `json:"disabled"`
+	CheckedAt       time.Time   `json:"checked_at,omitempty"`
+	NextCheck       time.Time   `json:"next_check"`
+	Reason          string      `json:"reason,omitempty"`
+	Channel         string      `json:"channel,omitempty"`
+	Generation      uint64      `json:"-"`
+	ProbeVersion    int         `json:"probe_version,omitempty"`
+	AutoEffort      EffortProbe `json:"auto_effort,omitempty"`
+	EffortCheckedAt time.Time   `json:"effort_checked_at,omitempty"`
 }
 
 type AvailabilityStore struct {
@@ -42,6 +51,16 @@ func NewAvailabilityStore(path string) (*AvailabilityStore, error) {
 	if s.items == nil {
 		s.items = map[string]Availability{}
 	}
+	// Legacy probes used invalid session IDs and treated temporary errors as
+	// permanent failures. These records cannot establish model unavailability.
+	for model, item := range s.items {
+		if item.ProbeVersion == 0 && item.Disabled {
+			item.Disabled = false
+			item.NextCheck = time.Time{}
+			item.Reason = "legacy_probe_recheck"
+			s.items[model] = item
+		}
+	}
 	return s, nil
 }
 
@@ -64,6 +83,7 @@ func (s *AvailabilityStore) Restore(model string, now time.Time) error {
 	item.Model, item.Disabled, item.Reason = model, false, "manually_enabled"
 	item.NextCheck = now.Add(FreeModelCheckInterval)
 	item.Generation++
+	item.ProbeVersion = 1
 	s.items[model] = item
 	if err := s.saveLocked(); err != nil {
 		if existed {
@@ -76,17 +96,28 @@ func (s *AvailabilityStore) Restore(model string, now time.Time) error {
 	return nil
 }
 
-func (s *AvailabilityStore) Record(model string, generation uint64, success bool, reason, channel string, now time.Time) error {
+func (s *AvailabilityStore) Record(model string, generation uint64, success bool, reason, channel string, now time.Time, effort EffortProbe) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item := s.items[model]
 	if item.Generation != generation {
 		return nil
 	}
-	item.Model, item.Disabled = model, !success
+	item.Model = model
+	if success {
+		item.Disabled = false
+	} else if reason == "model_unavailable" {
+		item.Disabled = true
+	}
 	item.CheckedAt, item.Reason, item.Channel = now, reason, channel
+	item.ProbeVersion = 1
+	if success && effort.Effort != "" {
+		item.AutoEffort, item.EffortCheckedAt = effort, now
+	} else if success && effort.Reset {
+		item.AutoEffort, item.EffortCheckedAt = EffortProbe{}, time.Time{}
+	}
 	interval := FreeModelCheckInterval
-	if !success {
+	if !success && reason == "model_unavailable" {
 		interval = FailedModelCheckInterval
 	}
 	item.NextCheck = now.Add(interval)

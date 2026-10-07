@@ -12,7 +12,7 @@ let csrf = "",
   logRenderPending = false,
   toastTimer = null;
 const pages = {
-  availability: ["13", "免费模型可用性", "每小时探测，失败后禁用并每 24 小时复测。"],
+  availability: ["13", "免费模型可用性", "每小时探测，明确失效后禁用并每 24 小时复测。"],
   rotation: ["12", "模型轮转", "共享当前模型、故障切换与尝试记录。"],
   overview: ["01", "运行桌面", "最近一小时、进程累计与当前资源状态。"],
   guide: ["02", "首次运行", "用六个检查点完成从配置到首个请求。"],
@@ -1401,6 +1401,9 @@ async function loadAvailability() {
         item.model,
         item.disabled ? "已禁用" : "已启用",
         [item.channel, item.reason].filter(Boolean).join(" / ") || "待探测",
+        item.auto_effort?.effort
+          ? `${item.auto_effort.effort}（${date(item.effort_checked_at)}）`
+          : "未验证",
         date(item.checked_at),
         date(item.next_check),
       ]) {
