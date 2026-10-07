@@ -85,13 +85,14 @@ type WebUIConfig struct {
 }
 
 type PerformanceConfig struct {
-	MaxIdleConns           int `json:"max_idle_conns"`
-	MaxIdleConnsPerHost    int `json:"max_idle_conns_per_host"`
-	MaxConnsPerHost        int `json:"max_conns_per_host"`
-	IdleConnTimeoutSeconds int `json:"idle_conn_timeout_seconds"`
-	ConnectTimeoutSeconds  int `json:"connect_timeout_seconds"`
-	FailureCooldownSeconds int `json:"failure_cooldown_seconds"`
-	AttemptTimeoutSeconds  int `json:"attempt_timeout_seconds"`
+	MaxIdleConns             int `json:"max_idle_conns"`
+	MaxIdleConnsPerHost      int `json:"max_idle_conns_per_host"`
+	MaxConnsPerHost          int `json:"max_conns_per_host"`
+	IdleConnTimeoutSeconds   int `json:"idle_conn_timeout_seconds"`
+	ConnectTimeoutSeconds    int `json:"connect_timeout_seconds"`
+	FailureCooldownSeconds   int `json:"failure_cooldown_seconds"`
+	AttemptTimeoutSeconds    int `json:"attempt_timeout_seconds"`
+	FirstEventTimeoutSeconds int `json:"first_event_timeout_seconds"`
 }
 
 // AttemptTimeout bounds how long a single upstream attempt may wait for
@@ -197,6 +198,9 @@ func Normalize(path string, cfg Config) (Config, error) {
 	}
 	if cfg.Performance.AttemptTimeoutSeconds < 0 {
 		return Config{}, errors.New("performance.attempt_timeout_seconds must not be negative (0 keeps the retry timeout)")
+	}
+	if cfg.Performance.FirstEventTimeoutSeconds < 0 || cfg.Performance.FirstEventTimeoutSeconds > 86400 {
+		return Config{}, errors.New("performance.first_event_timeout_seconds must be between 0 and 86400 (0 disables the first-event timeout)")
 	}
 	if cfg.Logging.Level != "debug" && cfg.Logging.Level != "info" && cfg.Logging.Level != "warn" && cfg.Logging.Level != "error" {
 		return Config{}, errors.New("logging.level must be debug, info, warn, or error")

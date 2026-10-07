@@ -78,7 +78,9 @@ func (g *Gateway) doUpstream(ctx context.Context, route models.Route, bodies map
 	// visible without dumping full payloads. Bodies stay out of attempt
 	// records; the hub redactor scrubs configured secrets from log output.
 	if len(errBody) > 0 {
-		snippet := string(errBody)
+		redactor := config.NewSecretRedactor()
+		redactor.Replace(g.cfg)
+		snippet := redactor.String(string(errBody))
 		if len(snippet) > 240 {
 			snippet = snippet[:240]
 		}
@@ -300,7 +302,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 		}
 		setRequestCredential(ctx, config.TierZen, "anonymous", "anonymous", true, node.proxy)
 		started := time.Now()
-		resp, err := node.proxy.client.Do(req)
+		resp, err := doInferenceAttempt(node.proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
 		duration := time.Since(started)
 		if ctx.Err() != nil {
 			// The parent budget expired while this attempt was in flight. Its
@@ -576,7 +578,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 		return nil, err, 0
 	}
 	started := time.Now()
-	resp, err := proxy.client.Do(req)
+	resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
 	duration := time.Since(started)
 	g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+1, keyID, "key", false, proxy, resp, err, duration)
 	if err != nil {
@@ -645,7 +647,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		keyID := config.KeyDisplayID(node.key)
 		setRequestCredential(ctx, route.Tier, keyID, "key", false, proxy)
 		attemptStarted := time.Now()
-		resp, err := proxy.client.Do(req)
+		resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
 		attemptDuration := time.Since(attemptStarted)
 		if ctx.Err() != nil {
 			// The request budget expired while this attempt was in flight. A

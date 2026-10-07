@@ -66,6 +66,9 @@
             <span class="nav-no">11</span><span>API Key 管理</span>
           </button>
           <button data-page="rotation"><span class="nav-no">12</span><span>模型轮转</span></button>
+          <button data-page="availability">
+            <span class="nav-no">13</span><span>免费模型可用性</span>
+          </button>
         </nav>
         <div class="sidebar-foot">
           <div class="live-line"><span class="live-dot"></span><span>CONTROL PLANE LIVE</span></div>
@@ -85,6 +88,34 @@
           </div>
         </header>
         <div id="restart-notice" class="notice hidden"></div>
+        <section id="page-availability" class="page hidden">
+          <div class="section">
+            <div class="section-head">
+              <h2>免费模型探测</h2>
+              <button id="availability-refresh" class="ghost">刷新状态</button>
+            </div>
+            <p>
+              检查名称含 free 或元数据零价格且未弃用的模型。优先匿名通道，再尝试 Zen
+              Key；全部失败后禁用，24 小时后复测。成功或手动恢复后，下一次探测在 1 小时后。
+            </p>
+            <p id="availability-error" role="status"></p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>模型</th>
+                    <th>状态</th>
+                    <th>通道 / 结果</th>
+                    <th>上次探测</th>
+                    <th>下次探测</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="availability-models"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
         <section id="page-overview" class="page">
           <div class="metric-grid">
             <div class="metric-card">
@@ -623,6 +654,10 @@
                     min="0"
                     placeholder="0 = 跟随请求超时"
                   />
+                </div>
+                <div class="field">
+                  <label>首个 SSE 事件超时（秒，0 关闭）</label>
+                  <input id="c-first-event-timeout" type="number" min="0" max="86400" />
                 </div>
                 <div class="field">
                   <label>日志级别</label

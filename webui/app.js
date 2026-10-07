@@ -12,6 +12,7 @@ let csrf = "",
   logRenderPending = false,
   toastTimer = null;
 const pages = {
+  availability: ["13", "免费模型可用性", "每小时探测，失败后禁用并每 24 小时复测。"],
   rotation: ["12", "模型轮转", "共享当前模型、故障切换与尝试记录。"],
   overview: ["01", "运行桌面", "最近一小时、进程累计与当前资源状态。"],
   guide: ["02", "首次运行", "用六个检查点完成从配置到首个请求。"],
@@ -120,6 +121,7 @@ function openPage(page) {
     }, 60000);
   }
   if (page === "rotation") loadRotation();
+  if (page === "availability") loadAvailability();
   if (page === "api-keys") loadAPIKeys();
   if (page === "playground" && !debugData) loadDebugModels();
   if (page === "diagnostics") {
@@ -157,6 +159,7 @@ function fillConfig(value) {
   $("#c-connect").value = value.performance.connect_timeout_seconds;
   $("#c-cooldown").value = value.performance.failure_cooldown_seconds;
   $("#c-attempt-timeout").value = value.performance.attempt_timeout_seconds;
+  $("#c-first-event-timeout").value = value.performance.first_event_timeout_seconds || 0;
   $("#c-level").value = value.logging.level;
   $("#c-ring").value = value.logging.ring_size;
   $("#c-dump-bodies").checked = !!value.logging.dump_request_bodies;
@@ -225,6 +228,7 @@ $("#config-form").addEventListener("submit", async (event) => {
         connect_timeout_seconds: number("#c-connect"),
         failure_cooldown_seconds: number("#c-cooldown"),
         attempt_timeout_seconds: number("#c-attempt-timeout"),
+        first_event_timeout_seconds: number("#c-first-event-timeout"),
       },
       logging: {
         level: $("#c-level").value,
@@ -1383,3 +1387,53 @@ $("#rotation-form").onsubmit = async (event) => {
   }
 };
 boot();
+
+async function loadAvailability() {
+  try {
+    const data = await api("/api/models/availability");
+    $("#availability-error").textContent = "";
+    $("#availability-models").replaceChildren();
+    for (const item of data.models) {
+      const row = document.createElement("tr");
+      const date = (value) =>
+        value && !value.startsWith("0001-") ? new Date(value).toLocaleString() : "待探测";
+      for (const value of [
+        item.model,
+        item.disabled ? "已禁用" : "已启用",
+        [item.channel, item.reason].filter(Boolean).join(" / ") || "待探测",
+        date(item.checked_at),
+        date(item.next_check),
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      const cell = document.createElement("td");
+      const button = document.createElement("button");
+      button.textContent = "恢复启用";
+      button.disabled = !item.disabled;
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          await api("/api/models/restore", {
+            method: "POST",
+            body: JSON.stringify({ model: item.model }),
+          });
+          await loadAvailability();
+          await loadDebugModels();
+        } catch (error) {
+          $("#availability-error").textContent = error.message;
+          button.disabled = false;
+        }
+      };
+      cell.append(button);
+      row.append(cell);
+      $("#availability-models").append(row);
+    }
+    if (!data.models.length)
+      $("#availability-error").textContent = "当前模型目录中没有符合免费资格的模型。";
+  } catch (error) {
+    $("#availability-error").textContent = error.message;
+  }
+}
+$("#availability-refresh").onclick = loadAvailability;

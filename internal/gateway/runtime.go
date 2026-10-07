@@ -18,10 +18,11 @@ import (
 )
 
 type gatewayRuntime struct {
-	config  config.Config
-	gateway *Gateway
-	handler http.Handler
-	cancel  context.CancelFunc
+	availability *modelcatalog.AvailabilityStore
+	config       config.Config
+	gateway      *Gateway
+	handler      http.Handler
+	cancel       context.CancelFunc
 }
 
 type ApplyResult struct {
@@ -31,18 +32,19 @@ type ApplyResult struct {
 }
 
 type RuntimeManager struct {
-	rotation   *rotation.Manager
-	configPath string
-	root       context.Context
-	logger     *slog.Logger
-	monitor    *telemetry.Monitor
-	hub        *telemetry.LogHub
-	redactor   *config.SecretRedactor
-	level      *slog.LevelVar
-	current    atomic.Pointer[gatewayRuntime]
-	updateMu   sync.Mutex
-	effective  effectiveListeners
-	metadata   *modelcatalog.PricingStore
+	rotation           *rotation.Manager
+	configPath         string
+	root               context.Context
+	logger             *slog.Logger
+	monitor            *telemetry.Monitor
+	hub                *telemetry.LogHub
+	redactor           *config.SecretRedactor
+	level              *slog.LevelVar
+	current            atomic.Pointer[gatewayRuntime]
+	updateMu           sync.Mutex
+	effective          effectiveListeners
+	metadata           *modelcatalog.PricingStore
+	availabilityCancel context.CancelFunc
 }
 
 type effectiveListeners struct {
@@ -110,6 +112,7 @@ func NewRuntimeManager(root context.Context, configPath string, cfg config.Confi
 	telemetry.SetLogLevel(manager.level, cfg.Logging.Level)
 	manager.start(runtime)
 	manager.metadata.Start(root)
+	manager.startAvailabilityChecks()
 	return manager, nil
 }
 
@@ -119,9 +122,21 @@ func (m *RuntimeManager) build(cfg config.Config) (*gatewayRuntime, error) {
 		return nil, err
 	}
 	gateway.rotation = m.rotation
+	availabilityPath := ""
+	if m.configPath != "" {
+		availabilityPath = m.configPath + "." + config.Fingerprint(cfg.Upstream.Zen) + ".availability.json"
+	}
+	availability, err := modelcatalog.NewAvailabilityStore(availabilityPath)
+	if err != nil {
+		return nil, fmt.Errorf("load model availability: %w", err)
+	}
+	if current := m.current.Load(); current != nil && current.config.Upstream.Zen == cfg.Upstream.Zen {
+		availability = current.availability
+	}
 	gateway.catalog.SetPricingStore(m.metadata)
+	gateway.catalog.SetAvailabilityStore(availability)
 	gateway.catalog.SetCachePath(modelcatalog.CatalogCachePath(m.configPath))
-	return &gatewayRuntime{config: cfg, gateway: gateway, handler: gateway.Handler(), cancel: func() {}}, nil
+	return &gatewayRuntime{config: cfg, gateway: gateway, availability: availability, handler: gateway.Handler(), cancel: func() {}}, nil
 }
 
 func (m *RuntimeManager) start(runtime *gatewayRuntime) {
@@ -264,6 +279,9 @@ func (m *RuntimeManager) Reload() (ApplyResult, error) {
 }
 
 func (m *RuntimeManager) Shutdown() {
+	if m.availabilityCancel != nil {
+		m.availabilityCancel()
+	}
 	if current := m.current.Load(); current != nil {
 		current.cancel()
 	}

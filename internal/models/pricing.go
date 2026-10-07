@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	modelsDevDefaultURL = "https://models.dev/api.json"
+	modelsDevDefaultURL = CapabilitiesURL
 	modelsDevRefresh    = 24 * time.Hour
 	modelsDevTimeout    = 30 * time.Second
 )

@@ -61,6 +61,7 @@ type Catalog struct {
 	updatedAt       time.Time
 	prefer          config.Tier
 	pricing         *PricingStore
+	availability    *AvailabilityStore
 	cachePath       string
 	cacheSource     string
 	stale           bool
@@ -94,6 +95,12 @@ func NewCatalog(prefer config.Tier, overrides map[string]string) *Catalog {
 func (c *Catalog) SetPricingStore(store *PricingStore) {
 	c.mu.Lock()
 	c.pricing = store
+	c.mu.Unlock()
+}
+
+func (c *Catalog) SetAvailabilityStore(store *AvailabilityStore) {
+	c.mu.Lock()
+	c.availability = store
 	c.mu.Unlock()
 }
 
@@ -197,6 +204,9 @@ func (c *Catalog) Route(model string, hasZenKeys, hasGoKeys, hasAnonymous bool) 
 }
 
 func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasAnonymous bool) (Route, error) {
+	if c.availability != nil && c.availability.Disabled(model) {
+		return Route{}, fmt.Errorf("model %q is disabled after a failed availability check; restore it in the WebUI or wait for the next probe", model)
+	}
 	keyTiers := c.keyTierOrderLocked(model, hasZenKeys, hasGoKeys)
 	// OpenCode's public credential is a Zen-only lane. Every free model starts
 	// there, even if the current catalog only advertises it on Go: an upstream
@@ -291,6 +301,9 @@ func (c *Catalog) RouteForTier(model string, tier config.Tier, hasZenKeys, hasGo
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.availability != nil && c.availability.Disabled(model) {
+		return Route{}, fmt.Errorf("model %q is disabled after a failed availability check", model)
+	}
 	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0
 	advertised := c.zen[model]
 	if tier == config.TierGo {
