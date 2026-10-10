@@ -22,3 +22,8 @@ coverage.out
 # Local credentials, deployment backups, and verification artifacts
 .local/
 *.availability.json
+
+# Proxy lists (contain credentials)
+/proxies.txt
+/proxies-bak.txt
+/proxies-geonode.txt
