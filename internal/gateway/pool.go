@@ -116,7 +116,13 @@ func (p *anonymousPool) MarkFailure(node *anonymousNode, resp *http.Response, er
 	if node == nil {
 		return
 	}
-	if err == nil && resp != nil && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
+	// 401 and 403 are request-level rejections (a bad shared credential or an
+	// upstream policy such as FreeTierError), not proxy failures: every exit IP
+	// gets the same answer, so cooling this node only drains the pool and shows
+	// up as the misleading "no healthy anonymous proxies available". Cool down
+	// only when another proxy could plausibly succeed: per-IP rate limits and
+	// server errors here, transport errors above.
+	if err == nil && resp != nil && resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
 		return
 	}
 	failures := node.failures.Add(1)
