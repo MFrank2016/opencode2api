@@ -322,6 +322,16 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			g.logger.Debug("anonymous upstream accepted request", "component", "upstream", "event", "anonymous_attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "status", resp.StatusCode, "duration_ms", duration.Milliseconds())
 			return resp, nil, attempts
 		}
+		// Request-shape errors are deterministic: every exit IP receives the
+		// same answer, so rotating through the rest of the pool only burns the
+		// request budget (an oversized-context 400 used to be retried on every
+		// proxy, delaying the client by ~300s). Authentication, throttling,
+		// server, and transport failures stay retryable because another proxy
+		// can change the outcome.
+		if isNonRetryableClientResponse(resp, err) {
+			g.logger.Debug("anonymous upstream rejected a non-retryable request", "component", "upstream", "event", "anonymous_attempt_rejected", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "status", resp.StatusCode, "proxy", config.RedactURL(node.proxy.name), "duration_ms", duration.Milliseconds())
+			return resp, nil, attempts
+		}
 		lastResponse = resp
 		lastErr = err
 		if err != nil {
