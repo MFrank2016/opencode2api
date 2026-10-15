@@ -208,6 +208,12 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 			return resp, route, attempts, nil
 		}
 		lastResponse, lastErr = resp, err
+		// A non-retryable client error (for example an oversized-context 400)
+		// is deterministic: no authenticated tier accepts the same request
+		// shape, so end the route here instead of re-sending it to every tier.
+		if isNonRetryableClientResponse(resp, err) {
+			return resp, route, attempts, nil
+		}
 		if len(route.KeyTiers) > 0 {
 			g.logger.Debug("anonymous request did not succeed; entering preferred key tiers", "component", "upstream", "event", "anonymous_fallback", "request_id", ids.Request, "attempts", attempts, "key_tiers", route.KeyTiers)
 		}
@@ -245,6 +251,11 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 			return resp, keyRoute, attempts, nil
 		}
 		lastResponse, lastErr = resp, err
+		// The same non-retryable rejection must end the route here too, rather
+		// than rotating through the remaining authenticated tiers.
+		if isNonRetryableClientResponse(resp, err) {
+			return resp, keyRoute, attempts, nil
+		}
 	}
 	if lastResponse != nil {
 		return lastResponse, effectiveRoute, attempts, nil

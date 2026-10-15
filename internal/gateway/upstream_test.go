@@ -112,3 +112,91 @@ func TestAnonymousLoopReturnsOnFirstSuccess(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
 }
+
+// newTierGateway builds a Gateway whose anonymous lane and key tiers all
+// answer with the given status, so the route-level fallback can be observed
+// by counting attempts.
+func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
+	proxies := make([]*proxyTransport, 0, 4)
+	for i := 0; i < 4; i++ {
+		proxy := &proxyTransport{index: i, name: "test-proxy", client: &http.Client{Transport: stubRoundTripper{status: status}}}
+		proxy.healthy.Store(true)
+		proxies = append(proxies, proxy)
+	}
+	transports := &transportPool{items: proxies}
+	cooldown := 15 * time.Second
+	zenNodes, err := newNodePool(zenKeys, transports, cooldown)
+	if err != nil {
+		return nil, err
+	}
+	goNodes, err := newNodePool(goKeys, transports, cooldown)
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.Config{}
+	cfg.Upstream.Anonymous = "http://anonymous.test"
+	cfg.Upstream.Zen = "http://zen.test"
+	cfg.Upstream.Go = "http://go.test"
+	cfg.Retry.MaxAttempts = 3
+	return &Gateway{
+		cfg:        cfg,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		transports: transports,
+		zenNodes:   zenNodes,
+		goNodes:    goNodes,
+		anonymous:  newAnonymousPool(true, transports, cooldown),
+		catalog:    models.NewCatalog(config.TierZen, nil),
+	}, nil
+}
+
+func routeBodies() map[config.Tier][]byte {
+	body := []byte(`{"model":"test-free","messages":[{"role":"user","content":"hi"}]}`)
+	return map[config.Tier][]byte{config.TierZen: body, config.TierGo: body}
+}
+
+func testRequestIDs() identity.RequestIDs {
+	return identity.RequestIDs{Session: "ses_0123456789abcdefghijklmnop", Request: "req_test", Project: "proj"}
+}
+
+// A non-retryable client error from the anonymous lane is deterministic: no
+// key tier accepts the same request shape, so the route must end there rather
+// than re-sending the request to every authenticated tier.
+func TestRouteEndsOnNonRetryable4xxAfterAnonymous(t *testing.T) {
+	g, err := newTierGateway(http.StatusBadRequest, []string{"zen-key"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithDiagnosticRequest(context.Background())
+	route := models.Route{ID: "test-free", Tier: config.TierZen, Protocol: wire.Chat, Anonymous: true, KeyTiers: []config.Tier{config.TierZen}}
+	resp, _, attempts, err := g.doUpstreamTiers(ctx, route, routeBodies(), testRequestIDs(), 0)
+	if err != nil {
+		t.Fatalf("doUpstreamTiers error = %v, want the 400 to end the route", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resp = %v, want a 400 response", resp)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (must not fall back to key tiers)", attempts)
+	}
+}
+
+// A non-retryable client error from one key tier must also end the route
+// instead of rotating through the remaining tiers.
+func TestRouteEndsOnNonRetryable4xxAcrossKeyTiers(t *testing.T) {
+	g, err := newTierGateway(http.StatusBadRequest, []string{"zen-key"}, []string{"go-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithDiagnosticRequest(context.Background())
+	route := models.Route{ID: "test-free", Tier: config.TierZen, Protocol: wire.Chat, Anonymous: false, KeyTiers: []config.Tier{config.TierZen, config.TierGo}}
+	resp, _, attempts, err := g.doUpstreamTiers(ctx, route, routeBodies(), testRequestIDs(), 0)
+	if err != nil {
+		t.Fatalf("doUpstreamTiers error = %v, want the 400 to end the route", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resp = %v, want a 400 response", resp)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (must not fall back to the next key tier)", attempts)
+	}
+}
