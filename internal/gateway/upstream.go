@@ -281,10 +281,10 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 		return nil, errors.New("no prepared Zen request body"), 0
 	}
 	// The anonymous free tier only serves agent-shaped streaming requests
-	// (anything else is rejected with 403 FreeTierError). Normalize the
-	// wire body here; the gateway collapses the stream back when the
-	// downstream client asked for a plain JSON reply. Key tiers keep their
-	// original bodies.
+	// carrying the official core tool definitions (anything else is rejected
+	// with 403 FreeTierError). Normalize the wire body here; the gateway
+	// collapses the stream back when the downstream client asked for a plain
+	// JSON reply. Key tiers keep their original bodies.
 	body = prepareAnonymousBody(body, route.ProtocolFor(config.TierZen))
 	for attempts < limit {
 		if ctx.Err() != nil {
@@ -315,7 +315,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 		}
 		setRequestCredential(ctx, config.TierZen, "anonymous", "anonymous", true, node.proxy)
 		started := time.Now()
-		resp, err := doInferenceAttempt(node.proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
+		resp, err := doInferenceAttempt(node.proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 		duration := time.Since(started)
 		if ctx.Err() != nil {
 			// The parent budget expired while this attempt was in flight. Its
@@ -344,7 +344,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			return resp, nil, attempts
 		}
 		lastResponse = resp
-		lastErr = err
+		lastErr = asProxyUnavailable(node.proxy, err)
 		if err != nil {
 			g.logger.Debug("anonymous transport attempt failed", "component", "upstream", "event", "anonymous_attempt_transport_failed", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "duration_ms", duration.Milliseconds(), "error", err)
 		} else {
@@ -356,6 +356,9 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no healthy anonymous proxies available")
+		if !g.transports.hasHealthy() {
+			lastErr = fmt.Errorf("no healthy anonymous proxies available: %w", errProxyUnavailable)
+		}
 	}
 	return nil, lastErr, attempts
 }
@@ -367,7 +370,11 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 // "shell" is the name OpenCode 2.x ships; the pre-2.x "bash" spelling is
 // deliberately not injected because the free tier validates the definition of
 // every tool it recognises, and a "bash" definition the gateway synthesises
-// does not match the one upstream expects.
+// does not match the one upstream expects. Since 2026-10-14 name presence is
+// not enough either: the upstream compares each recognised tool's description
+// and parameter schema against the official CLI's definitions byte-for-byte
+// (minimal stand-ins 403), which is why the genuine definitions below are
+// embedded. Tool order is irrelevant and extra client tools are allowed.
 var anonymousCoreTools = []string{"shell", "edit", "glob", "grep", "read"}
 
 // opencodeToolsJSON holds the genuine OpenCode tool definitions (description
@@ -559,19 +566,25 @@ func anonymousToolName(protocol wire.Protocol, item any) string {
 	return jsonutil.StringAt(entry, "name")
 }
 
+// anonymousToolset returns the official wire-shaped definitions for the
+// given tool names (all core tools when names is nil).
 func anonymousToolset(protocol wire.Protocol, names []string) []any {
 	if names == nil {
 		names = anonymousCoreTools
 	}
 	tools := make([]any, 0, len(names))
 	for _, name := range names {
-		tools = append(tools, anonymousTool(protocol, name))
+		if tool := anonymousTool(protocol, name); tool != nil {
+			tools = append(tools, tool)
+		}
 	}
 	return tools
 }
 
 // anonymousTool renders one core tool in the shape the given protocol expects,
-// using the genuine OpenCode definition whenever one is known.
+// using the genuine OpenCode definition whenever one is known. SystemOne
+// payloads never reach this path (prepareAnonymousBody forwards them
+// verbatim), so it falls back to the Chat shape.
 func anonymousTool(protocol wire.Protocol, name string) map[string]any {
 	description := "Agent tool " + name
 	parameters := map[string]any{"type": "object", "properties": map[string]any{}}
@@ -703,11 +716,11 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 		return nil, err, 0
 	}
 	started := time.Now()
-	resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
+	resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 	duration := time.Since(started)
 	g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+1, keyID, "key", false, proxy, resp, err, duration)
 	if err != nil {
-		return nil, err, 1
+		return nil, asProxyUnavailable(proxy, err), 1
 	}
 	return resp, nil, 1
 }
@@ -772,7 +785,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		keyID := config.KeyDisplayID(node.key)
 		setRequestCredential(ctx, route.Tier, keyID, "key", false, proxy)
 		attemptStarted := time.Now()
-		resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second)
+		resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 		attemptDuration := time.Since(attemptStarted)
 		if ctx.Err() != nil {
 			// The request budget expired while this attempt was in flight. A
@@ -800,7 +813,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			return resp, nil, attempts
 		}
 		lastResponse = resp
-		lastErr = err
+		lastErr = asProxyUnavailable(proxy, err)
 		if err != nil {
 			g.logger.Debug("upstream transport attempt failed", "component", "upstream", "event", "attempt_transport_failed", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "proxy", config.RedactURL(proxy.name), "duration_ms", attemptDuration.Milliseconds(), "error", err)
 		} else {
@@ -896,11 +909,7 @@ func (g *Gateway) recordUpstreamAttempt(ctx context.Context, route models.Route,
 		}
 		leg := label + ":"
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				leg += "timeout"
-			} else {
-				leg += "transport"
-			}
+			leg += classifyAttemptError(err)
 		} else {
 			leg += strconv.Itoa(status)
 		}
@@ -936,10 +945,18 @@ func newUpstreamRequest(ctx context.Context, baseURL string, protocol wire.Proto
 	// FreeTierError, so the client's header set is mirrored exactly.
 	req.Header.Set("User-Agent", httpx.UserAgent())
 	req.Header.Set("x-opencode-client", "cli")
+	// The free tier requires both session headers to carry the same
+	// descending-encoded id. The x-opencode-request correlation header and
+	// canonical prj_* project ids are rejected with 403 since 2026-10-14, so
+	// neither is forwarded; tracing stays local to this gateway.
 	req.Header.Set("x-opencode-session", ids.Session)
 	req.Header.Set("x-opencode-session-id", ids.Session)
 	req.Header.Set("x-session-affinity", ids.Session)
 	req.Header.Set("X-Session-Id", ids.Session)
+	// A canonical prj_* project id is rejected with 403 since 2026-10-14; the
+	// client's own bare 40-hex shape (or any non-canonical value, e.g.
+	// "global") passes. Hash the local project signal into the accepted shape
+	// so one conversation stays pinned to one upstream project.
 	req.Header.Set("x-opencode-project", clientProjectID(ids.Project))
 	if ids.ParentSession != "" {
 		req.Header.Set("x-parent-session-id", ids.ParentSession)
@@ -949,6 +966,9 @@ func newUpstreamRequest(ctx context.Context, baseURL string, protocol wire.Proto
 		req.Header.Set("anthropic-version", "2023-06-01")
 		req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14")
 	} else {
+		// The anonymous credential is the literal token "public". The 2026-10-14
+		// gate rejects keyless requests (an absent header used to pass) and is
+		// case-sensitive: "Bearer PUBLIC" 401s.
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	return req, nil

@@ -11,7 +11,6 @@ opencode/
 .tmp/
 .gocache/
 *.models.catalog.json
-node_modules/
 coverage.out
 *.test
 *.test.exe
