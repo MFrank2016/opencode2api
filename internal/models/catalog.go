@@ -67,6 +67,11 @@ type Catalog struct {
 	stale           bool
 	refreshAfter    time.Duration
 	freeOnly        bool
+	// contextOverrides replaces the advertised context window for the named
+	// models. OpenCode's capability catalog under-reports the free tier (for
+	// example it lists 200k for models that actually accept 1M), so operators
+	// can correct the value that discovery clients see.
+	contextOverrides map[string]int
 }
 
 type CatalogSnapshot struct {
@@ -88,8 +93,24 @@ func NewCatalog(prefer config.Tier, overrides map[string]string) *Catalog {
 		zen: map[string]bool{}, goModels: map[string]bool{}, protocols: protocols,
 		nativeProtocols: map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}},
 		unsupported:     map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}}, prefer: prefer,
-		cacheSource: "none",
+		contextOverrides: map[string]int{},
+		cacheSource:      "none",
 	}
+}
+
+// SetContextOverrides replaces the per-model context-window overrides that
+// MetadataForTier reports. Non-positive values and empty model names are
+// dropped; the map is copied, so callers may keep mutating their own.
+func (c *Catalog) SetContextOverrides(overrides map[string]int) {
+	copied := make(map[string]int, len(overrides))
+	for model, tokens := range overrides {
+		if model != "" && tokens > 0 {
+			copied[model] = tokens
+		}
+	}
+	c.mu.Lock()
+	c.contextOverrides = copied
+	c.mu.Unlock()
 }
 
 // SetPricingStore connects routing decisions to the shared pricing metadata.
@@ -495,6 +516,11 @@ func (c *Catalog) MetadataForTier(model string, tier config.Tier) Metadata {
 	c.mu.RLock()
 	md := c.modelMeta[tier][model]
 	pricing := c.pricing
+	// A configured override wins over both sources: OpenCode's catalog
+	// under-reports the free tier, and operators know the real window.
+	if override := c.contextOverrides[model]; override > 0 {
+		md.ContextWindow = override
+	}
 	c.mu.RUnlock()
 	if pricing == nil {
 		return md
