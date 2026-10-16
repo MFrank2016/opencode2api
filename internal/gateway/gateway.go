@@ -84,6 +84,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	catalog := models.NewCatalog(cfg.Prefer, cfg.Models.Protocols)
 	catalog.SetRefreshInterval(time.Duration(cfg.Models.RefreshSeconds) * time.Second)
 	catalog.SetFreeOnly(cfg.Models.FreeOnly)
+	catalog.SetContextOverrides(cfg.Models.Context)
 	return &Gateway{
 		cfg:            cfg,
 		rotation:       rotationManager,
@@ -353,11 +354,6 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 // request gets when the provider accepts it and then drops the connection
 // before the body completes.
 const upstreamBodyRetries = 1
-
-// statusClientClosedRequest is the conventional code for a request the client
-// abandoned before the response was ready. It is not in the HTTP spec, so the
-// standard library does not name it.
-const statusClientClosedRequest = 499
 
 // writeClientClosed records a request the client abandoned. The connection is
 // already gone, so this exists to keep the recorded status honest rather than

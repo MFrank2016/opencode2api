@@ -71,6 +71,11 @@ type ModelsConfig struct {
 	// FreeOnly limits discovery and routing to free models, even when Zen or
 	// Go keys could serve paid ones. Free models may still fall back to keys.
 	FreeOnly bool `json:"free_only"`
+	// Context overrides the advertised context window (in tokens) for the
+	// named models. OpenCode's capability catalog under-reports the free tier
+	// (it lists 200k for models that accept 1M), so operators can correct what
+	// discovery clients see. Routing does not depend on it.
+	Context map[string]int `json:"context"`
 }
 
 type LoggingConfig struct {
@@ -139,7 +144,7 @@ func Load(path string) (Config, error) {
 		Listen:      "127.0.0.1:8080",
 		Upstream:    UpstreamConfig{Zen: "https://opencode.ai/zen", Go: "https://opencode.ai/zen/go", Anonymous: "https://opencode.ai/inference"},
 		Retry:       RetryConfig{MaxAttempts: 3, TimeoutSeconds: 300},
-		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}},
+		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}, Context: map[string]int{}},
 		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
 		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
@@ -259,6 +264,11 @@ func Normalize(path string, cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("models.protocols contains invalid mapping %q: %q", model, protocol)
 		}
 	}
+	for model, tokens := range cfg.Models.Context {
+		if model == "" || tokens < 1 {
+			return Config{}, fmt.Errorf("models.context contains invalid entry %q: %d", model, tokens)
+		}
+	}
 	if err := normalizeReasoning(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -358,6 +368,13 @@ func Clone(cfg Config) Config {
 			protocols[key] = value
 		}
 		cfg.Models.Protocols = protocols
+	}
+	if cfg.Models.Context != nil {
+		context := make(map[string]int, len(cfg.Models.Context))
+		for model, tokens := range cfg.Models.Context {
+			context[model] = tokens
+		}
+		cfg.Models.Context = context
 	}
 	if cfg.Reasoning.EffortByModel != nil {
 		efforts := make(map[string]string, len(cfg.Reasoning.EffortByModel))
