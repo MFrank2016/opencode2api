@@ -122,24 +122,22 @@ func TestAnonymousMarkFailureHonorsRetryAfter(t *testing.T) {
 	}
 }
 
-func TestAnonymousNextSkipsCoolingNode(t *testing.T) {
+// When a healthy proxy is available, Next() must prefer it over a cooling one.
+// (The v1.4 upstream added a cooling-node fallback for when every static proxy
+// is unavailable, so the right invariant now is ordering, not exclusion.)
+func TestAnonymousNextPrefersHealthyOverCooling(t *testing.T) {
 	pool, nodes := newTestAnonymousPool(t, 2, 15*time.Second)
 	pool.MarkFailure(nodes[0], responseWithStatus(http.StatusTooManyRequests), nil)
-
-	seen := map[*anonymousNode]bool{}
 	cursor := pool.CursorFor("")
-	for {
-		node := cursor.Next()
-		if node == nil {
-			break
-		}
-		seen[node] = true
+	first := cursor.Next()
+	if first == nil {
+		t.Fatal("Next() returned nil")
 	}
-	if seen[nodes[0]] {
-		t.Fatal("Next() returned a node that is cooling down")
+	if first == nodes[0] {
+		t.Fatal("Next() returned the cooling node first; should prefer the healthy node")
 	}
-	if !seen[nodes[1]] {
-		t.Fatal("Next() did not return the healthy node")
+	if first != nodes[1] {
+		t.Fatal("Next() did not return the healthy node first")
 	}
 }
 
