@@ -85,6 +85,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	catalog.SetRefreshInterval(time.Duration(cfg.Models.RefreshSeconds) * time.Second)
 	catalog.SetFreeOnly(cfg.Models.FreeOnly)
 	catalog.SetContextOverrides(cfg.Models.Context)
+	catalog.SetMaxOutputOverrides(cfg.Models.MaxOutput)
 	return &Gateway{
 		cfg:            cfg,
 		rotation:       rotationManager,

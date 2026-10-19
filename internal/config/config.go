@@ -76,8 +76,10 @@ type ModelsConfig struct {
 	// (it lists 200k for models that accept 1M), so operators can correct what
 	// discovery clients see. Routing does not depend on it.
 	Context map[string]int `json:"context"`
+	// MaxOutput overrides the advertised maximum output (in tokens) for the named
+	// models. Same purpose as Context: the catalog understates the free tier.
+	MaxOutput map[string]int `json:"max_output"`
 }
-
 type LoggingConfig struct {
 	Level    string `json:"level"`
 	RingSize int    `json:"ring_size"`
@@ -144,7 +146,7 @@ func Load(path string) (Config, error) {
 		Listen:      "127.0.0.1:8080",
 		Upstream:    UpstreamConfig{Zen: "https://opencode.ai/zen", Go: "https://opencode.ai/zen/go", Anonymous: "https://opencode.ai/inference"},
 		Retry:       RetryConfig{MaxAttempts: 3, TimeoutSeconds: 300},
-		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}, Context: map[string]int{}},
+		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}, Context: map[string]int{}, MaxOutput: map[string]int{}},
 		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
 		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
@@ -270,6 +272,11 @@ func Normalize(path string, cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("models.context contains invalid entry %q: %d", model, tokens)
 		}
 	}
+	for model, tokens := range cfg.Models.MaxOutput {
+		if model == "" || tokens < 1 {
+			return Config{}, fmt.Errorf("models.max_output contains invalid entry %q: %d", model, tokens)
+		}
+	}
 	if err := normalizeReasoning(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -376,6 +383,13 @@ func Clone(cfg Config) Config {
 			context[model] = tokens
 		}
 		cfg.Models.Context = context
+	}
+	if cfg.Models.MaxOutput != nil {
+		maxOutput := make(map[string]int, len(cfg.Models.MaxOutput))
+		for model, tokens := range cfg.Models.MaxOutput {
+			maxOutput[model] = tokens
+		}
+		cfg.Models.MaxOutput = maxOutput
 	}
 	if cfg.Reasoning.EffortByModel != nil {
 		efforts := make(map[string]string, len(cfg.Reasoning.EffortByModel))
