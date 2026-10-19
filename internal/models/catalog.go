@@ -72,6 +72,10 @@ type Catalog struct {
 	// example it lists 200k for models that actually accept 1M), so operators
 	// can correct the value that discovery clients see.
 	contextOverrides map[string]int
+	// maxOutputOverrides replaces the advertised maximum output for the named
+	// models, for the same reason as contextOverrides: the catalog understates
+	// the free tier's output budget.
+	maxOutputOverrides map[string]int
 }
 
 type CatalogSnapshot struct {
@@ -93,8 +97,9 @@ func NewCatalog(prefer config.Tier, overrides map[string]string) *Catalog {
 		zen: map[string]bool{}, goModels: map[string]bool{}, protocols: protocols,
 		nativeProtocols: map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}},
 		unsupported:     map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}}, prefer: prefer,
-		contextOverrides: map[string]int{},
-		cacheSource:      "none",
+		contextOverrides:   map[string]int{},
+		maxOutputOverrides: map[string]int{},
+		cacheSource:        "none",
 	}
 }
 
@@ -110,6 +115,20 @@ func (c *Catalog) SetContextOverrides(overrides map[string]int) {
 	}
 	c.mu.Lock()
 	c.contextOverrides = copied
+	c.mu.Unlock()
+}
+
+// SetMaxOutputOverrides replaces the per-model maximum-output overrides that
+// MetadataForTier reports. Same validation rules as SetContextOverrides.
+func (c *Catalog) SetMaxOutputOverrides(overrides map[string]int) {
+	copied := make(map[string]int, len(overrides))
+	for model, tokens := range overrides {
+		if model != "" && tokens > 0 {
+			copied[model] = tokens
+		}
+	}
+	c.mu.Lock()
+	c.maxOutputOverrides = copied
 	c.mu.Unlock()
 }
 
@@ -520,6 +539,9 @@ func (c *Catalog) MetadataForTier(model string, tier config.Tier) Metadata {
 	// under-reports the free tier, and operators know the real window.
 	if override := c.contextOverrides[model]; override > 0 {
 		md.ContextWindow = override
+	}
+	if override := c.maxOutputOverrides[model]; override > 0 {
+		md.MaxOutput = override
 	}
 	c.mu.RUnlock()
 	if pricing == nil {
