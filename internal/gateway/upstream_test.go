@@ -39,14 +39,14 @@ func newAnonymousLoopGateway(proxyCount, status int) *Gateway {
 		proxy.healthy.Store(true)
 		proxies = append(proxies, proxy)
 	}
-	transports := &transportPool{items: proxies}
+	transports := &proxyTransports{items: proxies}
 	cfg := config.Config{}
 	cfg.Upstream.Anonymous = "http://anonymous.test"
 	return &Gateway{
 		cfg:        cfg,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		transports: transports,
-		anonymous:  newAnonymousPool(true, transports, 15*time.Second),
+		anonymous:  anonymousPool(true, transports, 15*time.Second),
 	}
 }
 
@@ -123,13 +123,13 @@ func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
 		proxy.healthy.Store(true)
 		proxies = append(proxies, proxy)
 	}
-	transports := &transportPool{items: proxies}
+	transports := &proxyTransports{items: proxies}
 	cooldown := 15 * time.Second
-	zenNodes, err := newNodePool(zenKeys, transports, cooldown)
+	zenNodes, err := nodePool(zenKeys, transports, cooldown)
 	if err != nil {
 		return nil, err
 	}
-	goNodes, err := newNodePool(goKeys, transports, cooldown)
+	goNodes, err := nodePool(goKeys, transports, cooldown)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
 		transports: transports,
 		zenNodes:   zenNodes,
 		goNodes:    goNodes,
-		anonymous:  newAnonymousPool(true, transports, cooldown),
-		catalog:    models.NewCatalog(config.TierZen, nil),
+		anonymous:  anonymousPool(true, transports, cooldown),
+		catalog:    models.Catalog(config.TierZen, nil),
 	}, nil
 }
 

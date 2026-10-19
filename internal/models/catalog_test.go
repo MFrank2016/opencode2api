@@ -7,7 +7,7 @@ import (
 	wire "opencode2api/internal/protocol"
 )
 
-func catalogWithModels(contextWindows map[string]int) *Catalog {
+func catalogWithModels(contextWindows map[string]int) *ModelCatalog {
 	ids := make([]string, 0, len(contextWindows))
 	protocols := map[string]wire.Protocol{}
 	metadata := map[string]Metadata{}
@@ -16,7 +16,7 @@ func catalogWithModels(contextWindows map[string]int) *Catalog {
 		protocols[model] = wire.Chat
 		metadata[model] = Metadata{ContextWindow: window}
 	}
-	c := NewCatalog(config.TierZen, nil)
+	c := Catalog(config.TierZen, nil)
 	c.ReplaceWithCapabilities(
 		ids,
 		nil,
@@ -56,14 +56,14 @@ func TestContextOverrideIgnoresInvalidEntries(t *testing.T) {
 }
 
 // catalogWithMeta builds a catalog whose models carry the given Metadata.
-func catalogWithMeta(entries map[string]Metadata) *Catalog {
+func catalogWithMeta(entries map[string]Metadata) *ModelCatalog {
 	ids := make([]string, 0, len(entries))
 	protocols := map[string]wire.Protocol{}
 	for model := range entries {
 		ids = append(ids, model)
 		protocols[model] = wire.Chat
 	}
-	c := NewCatalog(config.TierZen, nil)
+	c := Catalog(config.TierZen, nil)
 	c.ReplaceWithCapabilities(
 		ids,
 		nil,

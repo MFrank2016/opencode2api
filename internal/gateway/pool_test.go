@@ -10,7 +10,7 @@ import (
 
 // newTestAnonymousPool builds an anonymous pool of n always-healthy nodes with
 // the given base cooldown, mirroring newAnonymousPool's production wiring.
-func newTestAnonymousPool(t *testing.T, n int, cooldown time.Duration) (*anonymousPool, []*anonymousNode) {
+func newTestAnonymousPool(t *testing.T, n int, cooldown time.Duration) (*anonymousNodes, []*anonymousNode) {
 	t.Helper()
 	items := make([]*proxyTransport, 0, n)
 	for i := 0; i < n; i++ {
@@ -18,7 +18,7 @@ func newTestAnonymousPool(t *testing.T, n int, cooldown time.Duration) (*anonymo
 		proxy.healthy.Store(true)
 		items = append(items, proxy)
 	}
-	pool := newAnonymousPool(true, &transportPool{items: items}, cooldown)
+	pool := anonymousPool(true, &proxyTransports{items: items}, cooldown)
 	if len(pool.nodes) != n {
 		t.Fatalf("pool built with %d nodes, want %d", len(pool.nodes), n)
 	}
