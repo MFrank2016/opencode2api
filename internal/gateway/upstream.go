@@ -364,6 +364,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 				}
 				break
 			}
+			attempts++
 			setRequestShape(ctx, false, toolAliases[index])
 			if meta := telemetry.MetaFromContext(ctx); meta != nil {
 				meta.Attempts = attemptOffset + attempts

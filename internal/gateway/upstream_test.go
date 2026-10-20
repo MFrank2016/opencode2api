@@ -35,6 +35,7 @@ func newAnonymousLoopGateway(proxyCount, status int) *Gateway {
 			index:  i,
 			name:   "test-proxy",
 			client: &http.Client{Transport: stubRoundTripper{status: status}},
+			bun:    &http.Client{Transport: stubRoundTripper{status: status}},
 		}
 		proxy.healthy.Store(true)
 		proxies = append(proxies, proxy)
@@ -47,6 +48,7 @@ func newAnonymousLoopGateway(proxyCount, status int) *Gateway {
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		transports: transports,
 		anonymous:  anonymousPool(true, transports, 15*time.Second),
+		catalog:    models.Catalog(config.TierZen, nil),
 	}
 }
 
@@ -119,7 +121,7 @@ func TestAnonymousLoopReturnsOnFirstSuccess(t *testing.T) {
 func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
 	proxies := make([]*proxyTransport, 0, 4)
 	for i := 0; i < 4; i++ {
-		proxy := &proxyTransport{index: i, name: "test-proxy", client: &http.Client{Transport: stubRoundTripper{status: status}}}
+		proxy := &proxyTransport{index: i, name: "test-proxy", client: &http.Client{Transport: stubRoundTripper{status: status}}, bun: &http.Client{Transport: stubRoundTripper{status: status}}}
 		proxy.healthy.Store(true)
 		proxies = append(proxies, proxy)
 	}
