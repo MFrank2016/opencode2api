@@ -47,7 +47,7 @@ func newAnonymousLoopGateway(proxyCount, status int) *Gateway {
 		cfg:        cfg,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		transports: transports,
-		anonymous:  anonymousPool(true, transports, 15*time.Second),
+		anonymous:  anonymousPool(true, transports, 15*time.Second, anonymousBackoff{}),
 		catalog:    models.Catalog(config.TierZen, nil),
 	}
 }
@@ -146,7 +146,7 @@ func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
 		transports: transports,
 		zenNodes:   zenNodes,
 		goNodes:    goNodes,
-		anonymous:  anonymousPool(true, transports, cooldown),
+		anonymous:  anonymousPool(true, transports, cooldown, anonymousBackoff{}),
 		catalog:    models.Catalog(config.TierZen, nil),
 	}, nil
 }

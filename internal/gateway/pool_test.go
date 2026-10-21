@@ -18,7 +18,7 @@ func newTestAnonymousPool(t *testing.T, n int, cooldown time.Duration) (*anonymo
 		proxy.healthy.Store(true)
 		items = append(items, proxy)
 	}
-	pool := anonymousPool(true, &proxyTransports{items: items}, cooldown)
+	pool := anonymousPool(true, &proxyTransports{items: items}, cooldown, anonymousBackoff{})
 	if len(pool.nodes) != n {
 		t.Fatalf("pool built with %d nodes, want %d", len(pool.nodes), n)
 	}
