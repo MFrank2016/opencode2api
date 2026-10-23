@@ -387,11 +387,12 @@ func (p *anonymousNodes) RestoreProxy(proxy *proxyTransport) int {
 // full.
 const maxAnonymousRetryAfterMultiplier = 8
 
-// MarkFailure cools node down after an error or a 401, 403, 429 or 5xx
-// response; any other response leaves it untouched, and #pool nodes are never
-// cooled. The cooldown doubles with each consecutive failure, from the
-// base cooldown up to 8x, and a longer Retry-After extends it up to that same
-// 8x ceiling.
+// MarkFailure cools node down after a transport error or a 429 or 5xx
+// response. A 401 or 403 leaves it untouched because those are request-level
+// rejections rather than proxy failures (see the note below); so does any
+// other status, and #pool nodes are never cooled. The cooldown doubles with
+// each consecutive failure, from the base cooldown up to 8x, and a longer
+// Retry-After extends it up to that same 8x ceiling.
 func (p *anonymousNodes) MarkFailure(node *anonymousNode, resp *http.Response, err error) {
 	if node == nil || (node.proxy != nil && node.proxy.pool) {
 		return

@@ -1,7 +1,7 @@
 .key
 config.json
 .env
-config.json.bak
+config.json.bak*
 .config-*.tmp
 *.models.dev.json
 opencode/
@@ -26,3 +26,6 @@ coverage.out
 /proxies.txt
 /proxies-bak.txt
 /proxies-geonode.txt
+
+# Local agent session state, not part of the project source
+/.omo/
