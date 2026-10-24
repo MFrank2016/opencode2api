@@ -183,9 +183,15 @@ func TestAnonymousLoopReturnsOnFirstSuccess(t *testing.T) {
 // answer with the given status, so the route-level fallback can be observed
 // by counting attempts.
 func newTierGateway(status int, zenKeys, goKeys []string) (*Gateway, error) {
+	return newTierGatewayWithBody(status, "", zenKeys, goKeys)
+}
+
+// newTierGatewayWithBody is newTierGateway with a fixed upstream body, so a
+// test can give every lane the same error payload.
+func newTierGatewayWithBody(status int, body string, zenKeys, goKeys []string) (*Gateway, error) {
 	proxies := make([]*proxyTransport, 0, 4)
 	for i := 0; i < 4; i++ {
-		proxy := &proxyTransport{index: i, name: "test-proxy", client: &http.Client{Transport: stubRoundTripper{status: status}}, bun: &http.Client{Transport: stubRoundTripper{status: status}}}
+		proxy := &proxyTransport{index: i, name: "test-proxy", client: &http.Client{Transport: stubRoundTripper{status: status, body: body}}, bun: &http.Client{Transport: stubRoundTripper{status: status, body: body}}}
 		proxy.healthy.Store(true)
 		proxies = append(proxies, proxy)
 	}
@@ -262,6 +268,29 @@ func TestRouteReturnsFreeUsageLimitWithNoKeyTier(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1 (no key tier is configured)", attempts)
+	}
+}
+
+// A key that serves a free model draws on the same shared allowance as the
+// anonymous lane, so its 429 ends the key rotation too: every remaining key
+// would answer identically.
+func TestRouteStopsOnFreeUsageLimitAcrossKeyTiers(t *testing.T) {
+	const body = `{"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached."}}`
+	g, err := newTierGatewayWithBody(http.StatusTooManyRequests, body, []string{"zen-key-1", "zen-key-2", "zen-key-3"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithDiagnosticRequest(context.Background())
+	route := models.Route{ID: "test-free", Tier: config.TierZen, Protocol: wire.Chat, Anonymous: false, KeyTiers: []config.Tier{config.TierZen}}
+	resp, _, attempts, err := g.doUpstreamTiers(ctx, route, routeBodies(), testRequestIDs(), 0)
+	if err != nil {
+		t.Fatalf("doUpstreamTiers error = %v, want the 429 handed to the client", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp = %v, want a 429 response", resp)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (an exhausted allowance must not rotate keys)", attempts)
 	}
 }
 

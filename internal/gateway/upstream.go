@@ -310,6 +310,17 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 				}
 				return resp, keyRoute, attempts, nil
 			}
+			// The free tier counts its allowance per credential across every
+			// exit IP, and a free model served by a key still draws on that same
+			// allowance: rotating to the next key cannot find a working one. Stop
+			// here and hand this 429 back with its Retry-After.
+			if peekFreeUsageLimit(resp) {
+				g.logger.Warn("free tier allowance exhausted; not trying other keys", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempts", attempts, "tier", keyRoute.Tier, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"))
+				if lastResponse != nil {
+					httpx.DrainAndClose(lastResponse.Body)
+				}
+				return resp, keyRoute, attempts, nil
+			}
 			if lastResponse != nil {
 				httpx.DrainAndClose(lastResponse.Body)
 			}
@@ -1398,6 +1409,15 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+attempts, keyID, "key", false, proxy, resp, err, attemptDuration)
 		if err == nil && resp.StatusCode/100 == 2 {
 			g.logger.Debug("upstream accepted request", "component", "upstream", "event", "attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "proxy", config.RedactURL(proxy.name), "status", resp.StatusCode, "duration_ms", attemptDuration.Milliseconds())
+			return resp, nil, attempts
+		}
+		// The free tier counts its allowance per credential across every exit
+		// IP, and a key serving a free model draws on that same allowance: the
+		// next key answers identically. Leave the tier instead of rotating
+		// through the rest of the pool, which only multiplied the requests and
+		// the latency by the number of keys left.
+		if peekFreeUsageLimit(resp) {
+			g.logger.Warn("free tier allowance exhausted; not rotating keys", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"))
 			return resp, nil, attempts
 		}
 		// Request-shape errors are deterministic and must leave this tier without
