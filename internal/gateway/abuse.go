@@ -136,6 +136,52 @@ func isDeterministicClientResponse(status int, body []byte) bool {
 	return false
 }
 
+// errFreeUsageLimit reports that the anonymous credential's shared free-tier
+// allowance is exhausted. The tier counts that allowance per credential across
+// every exit IP, so a fresh proxy draws from the same empty pool: walking the
+// rest of the cursor cannot find a working exit, it only multiplies the
+// upstream requests and the latency by the number of exits left. The request
+// must therefore end and hand the upstream 429, with its Retry-After, to the
+// client.
+//
+// The genuine OpenCode client treats the same answer the same way: its
+// session runner marks provider.free-limit as non-retryable and surfaces the
+// reset time instead of retrying.
+var errFreeUsageLimit = errors.New("free tier allowance exhausted")
+
+// freeUsageLimitMarkers are the error types the free tier uses for an
+// exhausted allowance. The status must be 429 as well: FreeTierError shares
+// none of these markers and is a different answer (see isNetworkAbuseBlock
+// and the request-shape gates).
+var freeUsageLimitMarkers = []string{
+	"FreeUsageLimitError",
+	"GoUsageLimitError",
+}
+
+// isFreeUsageLimitResponse reports whether status and body describe the free
+// tier's exhausted allowance rather than a per-exit rate limit that another
+// proxy could clear.
+func isFreeUsageLimitResponse(status int, body []byte) bool {
+	if status != http.StatusTooManyRequests {
+		return false
+	}
+	text := string(body)
+	for _, marker := range freeUsageLimitMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// peekFreeUsageLimit classifies a response without consuming its body.
+func peekFreeUsageLimit(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	return isFreeUsageLimitResponse(resp.StatusCode, peekResponseBody(resp))
+}
+
 // replayBody returns a body that yields prefix and then the rest of original.
 func replayBody(prefix []byte, original io.ReadCloser) io.ReadCloser {
 	return &prefixBody{Reader: io.MultiReader(bytes.NewReader(prefix), original), closer: original}

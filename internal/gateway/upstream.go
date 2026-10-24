@@ -385,6 +385,10 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 	// then reports errDeterministicClientRejection so the caller keeps this
 	// 4xx instead of replacing it with a later tier's answer.
 	halted := false
+	// quotaExhausted records that the free tier's shared allowance is gone.
+	// The result then reports errFreeUsageLimit so the caller stops walking
+	// exits and hands the upstream 429, with its Retry-After, to the client.
+	quotaExhausted := false
 	cursor := g.anonymous.CursorFor(ids.Session)
 	limit := min(g.anonymous.Len(), g.maxAnonymousExits())
 	if g.anonymous.HasPool() && g.cfg.Retry.MaxAttempts > limit {
@@ -476,6 +480,17 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 				g.logger.Debug("anonymous upstream accepted request", "component", "upstream", "event", "anonymous_attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "status", resp.StatusCode, "duration_ms", duration.Milliseconds())
 				return resp, nil, attempts
 			}
+			// The free tier's allowance is shared by every exit IP, so a 429 that
+			// names it is the same answer on the next proxy. Stop the walk here and
+			// keep the response: its Retry-After is what the client needs, and
+			// re-sending only multiplies the upstream requests and the latency.
+			if err == nil && peekFreeUsageLimit(resp) {
+				lastResponse, lastErr = resp, errFreeUsageLimit
+				quotaExhausted = true
+				g.logger.Warn("free tier allowance exhausted; not walking the remaining exits", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"), "proxy", config.RedactURL(node.proxy.name))
+				break
+			}
+			// [fork] Request-shape errors are deterministic: end the route instead of
 			// [fork] Request-shape errors are deterministic: end the route instead of
 			// rotating through the rest of the pool (an oversized-context 400 used to
 			// be retried on every proxy, delaying the client by ~300s).
@@ -515,11 +530,12 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 				break
 			}
 		}
-		if halted {
-			// A request-level rejection is identical on every exit: another
-			// proxy cannot shorten the context or repair the payload. Keep the
-			// response and let the caller forward it instead of sending the
-			// same request through every remaining exit.
+		if halted || quotaExhausted {
+			// Both answers are identical on every exit: a request-level
+			// rejection because another proxy cannot repair the payload, an
+			// exhausted allowance because the quota is shared rather than
+			// per-exit. Keep the response and let the caller forward it
+			// instead of sending the same request through every remaining exit.
 			g.anonymous.NoteNeutral()
 			break
 		}
@@ -549,6 +565,12 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 		// earlier exit: it is the error the client can act on, and forwarding
 		// the block instead would hide the real cause.
 		if halted {
+			return lastResponse, errDeterministicClientRejection, attempts
+		}
+		if quotaExhausted {
+			return lastResponse, errFreeUsageLimit, attempts
+		}
+		if blocked {
 			return lastResponse, errDeterministicClientRejection, attempts
 		}
 		if blocked {

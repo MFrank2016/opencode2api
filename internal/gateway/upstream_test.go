@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,15 +16,23 @@ import (
 	wire "opencode2api/internal/protocol"
 )
 
-// stubRoundTripper answers every request with a fixed status so the anonymous
-// rotation loop can be exercised without a network.
-type stubRoundTripper struct{ status int }
+// stubRoundTripper answers every request with a fixed status and body so the
+// anonymous rotation loop can be exercised without a network. An empty body
+// stands in for the smallest possible JSON object.
+type stubRoundTripper struct {
+	status int
+	body   string
+}
 
 func (s stubRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	body := s.body
+	if body == "" {
+		body = "{}"
+	}
 	return &http.Response{
 		StatusCode: s.status,
 		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader("{}")),
+		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    r,
 	}, nil
 }
@@ -90,7 +99,9 @@ func TestAnonymousLoopShortCircuitsOnNonRetryable4xx(t *testing.T) {
 }
 
 // Rate limits, authentication failures, and server errors are proxy-dependent:
-// another exit IP can succeed, so the loop must still try every proxy.
+// another exit IP can succeed, so the loop must still try every proxy. The
+// 429 here carries no free-tier allowance marker, so it stays a per-exit rate
+// limit: only the shared-allowance answer below ends the walk.
 func TestAnonymousLoopRotatesOnRetryableStatuses(t *testing.T) {
 	for _, status := range []int{http.StatusTooManyRequests, http.StatusBadGateway, http.StatusForbidden} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -102,6 +113,59 @@ func TestAnonymousLoopRotatesOnRetryableStatuses(t *testing.T) {
 				t.Fatalf("attempts = %d, want >= 6 (retryable status must rotate across proxies)", attempts)
 			}
 		})
+	}
+}
+
+// newFreeUsageLimitGateway builds an anonymous pool of proxyCount always-healthy
+// nodes whose upstream answers with the free tier's exhausted-allowance 429.
+func newFreeUsageLimitGateway(proxyCount int) *Gateway {
+	const body = `{"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached."}}`
+	proxies := make([]*proxyTransport, 0, proxyCount)
+	for i := 0; i < proxyCount; i++ {
+		proxy := &proxyTransport{
+			index:  i,
+			name:   "test-proxy",
+			client: &http.Client{Transport: stubRoundTripper{status: http.StatusTooManyRequests, body: body}},
+			bun:    &http.Client{Transport: stubRoundTripper{status: http.StatusTooManyRequests, body: body}},
+		}
+		proxy.healthy.Store(true)
+		proxies = append(proxies, proxy)
+	}
+	transports := &proxyTransports{items: proxies}
+	cfg := config.Config{}
+	cfg.Upstream.Anonymous = "http://anonymous.test"
+	return &Gateway{
+		cfg:        cfg,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		transports: transports,
+		anonymous:  anonymousPool(true, transports, 15*time.Second, anonymousBackoff{}),
+		catalog:    models.Catalog(config.TierZen, nil),
+	}
+}
+
+// The free tier counts its allowance per credential across every exit IP, so
+// the same 429 comes back on the next proxy. The loop must stop after the
+// first attempt and hand that response to the caller: walking the remaining
+// exits only multiplies the upstream requests and the latency by the number
+// of exits left, which is what a 32-attempt, 53-second request looked like.
+func TestAnonymousLoopStopsOnFreeUsageLimit(t *testing.T) {
+	g := newFreeUsageLimitGateway(8)
+	ctx := WithDiagnosticRequest(context.Background())
+	route := models.Route{ID: "test-free", Tier: config.TierZen, Protocol: wire.Chat, Anonymous: true}
+	bodies := map[config.Tier][]byte{
+		config.TierZen: []byte(`{"model":"test-free","messages":[{"role":"user","content":"hi"}]}`),
+	}
+	ids := identity.RequestIDs{Session: "ses_0123456789abcdefghijklmnop", Request: "req_test", Project: "proj"}
+
+	resp, err, attempts := g.doAnonymousUpstream(ctx, route, bodies, ids, 0)
+	if !errors.Is(err, errFreeUsageLimit) {
+		t.Fatalf("err = %v, want errFreeUsageLimit", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp = %v, want the upstream 429", resp)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (an exhausted allowance must not walk the pool)", attempts)
 	}
 }
 
@@ -179,6 +243,25 @@ func TestRouteEndsOnNonRetryable4xxAfterAnonymous(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1 (must not fall back to key tiers)", attempts)
+	}
+}
+
+// With no authenticated tier configured, an exhausted allowance is the
+// client's answer: the route returns the upstream 429 unchanged, so its
+// Retry-After reaches the caller, and it does so after a single attempt.
+func TestRouteReturnsFreeUsageLimitWithNoKeyTier(t *testing.T) {
+	g := newFreeUsageLimitGateway(8)
+	ctx := WithDiagnosticRequest(context.Background())
+	route := models.Route{ID: "test-free", Tier: config.TierZen, Protocol: wire.Chat, Anonymous: true}
+	resp, _, attempts, err := g.doUpstreamTiers(ctx, route, routeBodies(), testRequestIDs(), 0)
+	if err != nil {
+		t.Fatalf("doUpstreamTiers error = %v, want the 429 handed to the client", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp = %v, want a 429 response", resp)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (no key tier is configured)", attempts)
 	}
 }
 
