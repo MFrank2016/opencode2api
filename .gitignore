@@ -26,6 +26,11 @@ coverage.out
 /proxies.txt
 /proxies-bak.txt
 /proxies-geonode.txt
+/runtime/
 
 # Local agent session state, not part of the project source
 /.omo/
+
+# Python bytecode from local test runs
+__pycache__/
+*.pyc

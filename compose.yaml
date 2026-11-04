@@ -37,6 +37,10 @@ services:
         target: /run/config/opencode2api.json
     volumes:
       - opencode2api-state:/var/lib/opencode2api
+      # decodo proxy list, refreshed by scripts/sync-decodo-proxies.py. The
+      # runtime reads it through config.json's proxyfile (an absolute path,
+      # independent of the state volume). Read-only: the sync script owns it.
+      - ./runtime:/run/proxies:ro
     tmpfs:
       - /tmp
 

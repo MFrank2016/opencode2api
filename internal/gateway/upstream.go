@@ -447,6 +447,11 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 		proxies++
 		var nodeResp *http.Response
 		var nodeErr error
+		// rotatedFreeLimit records that this exit's exhausted-allowance 429 was
+		// handled by cooling the exit: the outer walk must continue to the next
+		// exit instead of ending, and the 429 must not be recorded as a lane
+		// failure (which would open the circuit breaker).
+		rotatedFreeLimit := false
 		for index, baseURL := range upstreams {
 			if ctx.Err() != nil {
 				if lastErr == nil && lastResponse == nil {
@@ -492,14 +497,24 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 				g.logger.Debug("anonymous upstream accepted request", "component", "upstream", "event", "anonymous_attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "status", resp.StatusCode, "duration_ms", duration.Milliseconds())
 				return resp, nil, attempts
 			}
-			// The free tier's allowance is shared by every exit IP, so a 429 that
-			// names it is the same answer on the next proxy. Stop the walk here and
-			// keep the response: its Retry-After is what the client needs, and
-			// re-sending only multiplies the upstream requests and the latency.
+			// The free tier's allowance is normally shared by every exit IP, so a
+			// 429 that names it is the same answer on the next proxy and the walk
+			// stops here. With free_limit_rotation the pool's exits land in
+			// different allowance buckets: cool this one for Retry-After and
+			// keep walking. Exhausted exits are skipped by the cursor, so the
+			// loop ends after trying each usable exit once and still hands the
+			// last 429 (with its Retry-After) to the client.
 			if err == nil && peekFreeUsageLimit(resp) {
 				lastResponse, lastErr = resp, errFreeUsageLimit
 				quotaExhausted = true
-				g.logger.Warn("free tier allowance exhausted; not walking the remaining exits", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"), "proxy", config.RedactURL(node.proxy.name))
+				if g.cfg.Performance.FreeLimitRotation {
+					g.anonymous.MarkFreeLimit(node, resp)
+					g.anonymous.NoteNeutral()
+					rotatedFreeLimit = true
+					g.logger.Warn("free tier allowance exhausted on this exit; rotating", "component", "upstream", "event", "free_usage_limit_rotate", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"), "proxy", config.RedactURL(node.proxy.name))
+				} else {
+					g.logger.Warn("free tier allowance exhausted; not walking the remaining exits", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"), "proxy", config.RedactURL(node.proxy.name))
+				}
 				break
 			}
 			// [fork] Request-shape errors are deterministic: end the route instead of
@@ -541,6 +556,12 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			if index+1 < len(upstreams) && !node.proxy.healthy.Load() {
 				break
 			}
+		}
+		if rotatedFreeLimit {
+			// The exhausted exit has been cooled and the cursor skips it now.
+			// Try the next exit; when none is left the loop ends naturally and
+			// the last 429 (with Retry-After) is forwarded to the client.
+			continue
 		}
 		if halted || quotaExhausted {
 			// Both answers are identical on every exit: a request-level

@@ -252,6 +252,12 @@ type PerformanceConfig struct {
 	// this value; a rotating #pool entry is drawn once per retry.max_attempts
 	// instead.
 	MaxAnonymousExits int `json:"max_anonymous_exits"`
+	// FreeLimitRotation makes an exhausted-allowance 429 a per-exit condition:
+	// the gateway cools that egress IP for Retry-After and tries the next exit
+	// instead of ending the walk. Off by default because the upstream normally
+	// shares one allowance across every exit; enable only with a proxy pool
+	// whose exits genuinely land in different allowance buckets.
+	FreeLimitRotation bool `json:"free_limit_rotation"`
 	// FreeTierBlockSeconds is how long an exit the free tier flagged as
 	// abusive stays out of the anonymous cursor. Upstream does not publish
 	// the block duration, so the default is a conservative 15 minutes.

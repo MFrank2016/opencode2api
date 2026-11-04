@@ -44,6 +44,12 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	// SIGHUP is handled separately so it reloads the config instead of
+	// terminating the process. A buffered channel keeps a burst of sync
+	// signals from being dropped while a reload is in flight.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
 	level := new(slog.LevelVar)
 	telemetry.SetLogLevel(level, cfg.Logging.Level)
 	hub := telemetry.LogHub(cfg.Logging.RingSize)
@@ -57,6 +63,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer manager.Shutdown()
+
+	go reloadLoop(ctx, hup, func() error {
+		_, err := manager.Reload()
+		return err
+	}, logger)
 
 	apiServer := &http.Server{
 		Addr: cfg.Listen, Handler: manager.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
@@ -79,6 +90,26 @@ func main() {
 	for _, server := range servers {
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			logger.Error("graceful shutdown failed", "component", "server", "event", "shutdown_failed", "address", server.Addr, "error", err)
+		}
+	}
+}
+
+// reloadLoop applies the configuration on every SIGHUP until ctx is done. A
+// proxy-list sync script sends the signal after atomically replacing a
+// proxyfile, so it can refresh the runtime without a WebUI credential or a
+// restart. Reload errors are logged but never stop the loop: a bad file must
+// not make the running gateway unresponsive to a later, fixed one.
+func reloadLoop(ctx context.Context, signals <-chan os.Signal, reload func() error, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-signals:
+			if err := reload(); err != nil {
+				logger.Error("configuration reload failed", "component", "config", "event", "reload_failed", "error", err)
+				continue
+			}
+			logger.Info("configuration reloaded", "component", "config", "event", "reload_succeeded")
 		}
 	}
 }

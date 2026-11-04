@@ -214,15 +214,28 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 // refreshProtocolCapabilities fetches OpenCode's capability catalog through
 // each healthy proxy in turn until one succeeds. Only a gateway without any
 // transport falls back to a direct client.
+// maxCapabilityRefreshProxies bounds how many proxy routes one capability
+// refresh tries. The refresh shares a 30-second context with the model
+// listing; walking a large proxy pool from end to end (each dead proxy
+// consuming its own timeout) starved that listing and left the catalog with
+// only the two models that happened to be cached. A few healthy routes are
+// enough, and a failed refresh keeps the previous catalog.
+const maxCapabilityRefreshProxies = 3
+
 func (g *Gateway) refreshProtocolCapabilities(ctx context.Context) (modelcatalog.Capabilities, error) {
 	if g.transports == nil || len(g.transports.items) == 0 {
 		return modelcatalog.FetchCapabilities(ctx, &http.Client{Timeout: 30 * time.Second}, modelcatalog.CapabilitiesURL)
 	}
 	var lastErr error
+	tried := 0
 	for _, proxy := range g.transports.items {
+		if tried >= maxCapabilityRefreshProxies {
+			break
+		}
 		if proxy == nil || !proxy.healthy.Load() {
 			continue
 		}
+		tried++
 		capabilities, err := modelcatalog.FetchCapabilities(ctx, proxy.client, modelcatalog.CapabilitiesURL)
 		if err == nil {
 			return capabilities, nil

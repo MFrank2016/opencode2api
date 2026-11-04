@@ -38,6 +38,11 @@ type proxyTransport struct {
 	healthy      atomic.Bool
 	checking     atomic.Bool
 	blockedUntil atomic.Int64
+	// freeLimitUntil keeps an exit whose free-tier allowance is exhausted out
+	// of the anonymous cursor until Retry-After. It is deliberately separate
+	// from blockedUntil (an abuse IP block): exhausted exits do not trip the
+	// lane-wide circuit breaker, because other exits can still serve traffic.
+	freeLimitUntil atomic.Int64
 }
 
 // proxyTransports holds every configured proxy route, indexed by
@@ -52,6 +57,23 @@ func (t *proxyTransport) blocked(now time.Time) bool {
 		return false
 	}
 	return t.blockedUntil.Load() > now.UnixNano()
+}
+
+// freeLimitBlocked reports whether this exit's free-tier allowance is exhausted.
+func (t *proxyTransport) freeLimitBlocked(now time.Time) bool {
+	if t == nil {
+		return false
+	}
+	return t.freeLimitUntil.Load() > now.UnixNano()
+}
+
+// markFreeLimit keeps this exit out of the anonymous cursor until its
+// allowance resets.
+func (t *proxyTransport) markFreeLimit(until time.Time) {
+	if t == nil {
+		return
+	}
+	t.freeLimitUntil.Store(until.UnixNano())
 }
 
 // markBlocked keeps this exit out of the anonymous cursor until until. The
@@ -292,7 +314,10 @@ func (c *anonymousCursor) Next() *anonymousNode {
 	}
 	now := time.Now().UnixNano()
 	isBlocked := func(node *anonymousNode) bool {
-		return node.proxy != nil && node.proxy.blockedUntil.Load() > now
+		if node.proxy == nil {
+			return false
+		}
+		return node.proxy.blockedUntil.Load() > now || node.proxy.freeLimitUntil.Load() > now
 	}
 	for c.offset < n {
 		idx := (c.start + c.offset) % n
@@ -393,6 +418,33 @@ const maxAnonymousRetryAfterMultiplier = 8
 // other status, and #pool nodes are never cooled. The cooldown doubles with
 // each consecutive failure, from the base cooldown up to 8x, and a longer
 // Retry-After extends it up to that same 8x ceiling.
+// MarkFreeLimit cools the exit whose free-tier allowance is exhausted for the
+// Retry-After window (up to a day) and keeps it out of the anonymous cursor.
+// Unlike a transport failure, this is not a strike against the lane: another
+// exit can still serve traffic. The block also applies to #pool nodes, which
+// otherwise have no cooldown of their own.
+func (p *anonymousNodes) MarkFreeLimit(node *anonymousNode, resp *http.Response) {
+	if node == nil || node.proxy == nil {
+		return
+	}
+	delay := 15 * time.Minute
+	if resp != nil {
+		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); retryAfter > 0 {
+			delay = min(retryAfter, 24*time.Hour)
+		}
+	}
+	until := time.Now().Add(delay)
+	node.proxy.markFreeLimit(until)
+	node.cooldownUntil.Store(until.UnixNano())
+}
+
+// MarkFailure records a failed attempt against one node. A 401 or 403 is a
+// request-level rejection (a bad shared credential or an upstream policy such
+// as FreeTierError), not a proxy failure: every exit IP gets the same answer,
+// so cooling this node only drains the pool and shows up as the misleading
+// "no healthy anonymous proxies available". Cool down only when another proxy
+// could plausibly succeed: per-IP rate limits and server errors here, transport
+// errors above.
 func (p *anonymousNodes) MarkFailure(node *anonymousNode, resp *http.Response, err error) {
 	if node == nil || (node.proxy != nil && node.proxy.pool) {
 		return
