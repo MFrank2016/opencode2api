@@ -63,6 +63,23 @@ class SelectTests(unittest.TestCase):
             sync.select(entries, 1, seed=7),
         )
 
+    def test_daily_seed_is_stable_within_a_day(self):
+        from datetime import datetime, timezone
+
+        entries = [(10001, f"http://u{i}:p@dc.decodo.com:10001") for i in range(20)]
+        day = datetime(2026, 11, 4, tzinfo=timezone.utc)
+        a = sync.daily_seed(day)
+        b = sync.daily_seed(day.replace(hour=23, minute=59))
+        self.assertEqual(a, b)
+        self.assertEqual(sync.select(entries, 1, a), sync.select(entries, 1, b))
+
+    def test_daily_seed_changes_the_next_day(self):
+        from datetime import datetime, timezone
+
+        today = datetime(2026, 11, 4, tzinfo=timezone.utc)
+        tomorrow = datetime(2026, 11, 5, tzinfo=timezone.utc)
+        self.assertNotEqual(sync.daily_seed(today), sync.daily_seed(tomorrow))
+
     def test_per_port_two_keeps_two_distinct_per_port(self):
         entries = [(10001, f"http://u{i}:p@dc.decodo.com:10001") for i in range(5)]
         chosen = sync.select(entries, 2, seed=1)
@@ -71,12 +88,12 @@ class SelectTests(unittest.TestCase):
 
 
 class AtomicWriteTests(unittest.TestCase):
-    def test_writes_0600_and_reports_no_change_on_identical_content(self):
+    def test_writes_0644_and_reports_no_change_on_identical_content(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "proxies.txt")
             lines = ["http://u:p@dc.decodo.com:10001"]
             self.assertTrue(sync.atomic_write(path, lines))
-            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
+            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o644")
             self.assertFalse(sync.atomic_write(path, lines))
             with open(path, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), lines[0] + "\n")

@@ -17,6 +17,8 @@ and, through it, this proxyfile.
 from __future__ import annotations
 
 import argparse
+import datetime
+import hashlib
 import os
 import subprocess
 import sys
@@ -66,6 +68,19 @@ def parse_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def daily_seed(now: datetime.datetime | None = None) -> int:
+    """Stable selection seed for one UTC day.
+
+    A fresh random pick on every 10-minute sync would rewrite the proxyfile
+    and SIGHUP the gateway each time, rebuilding the runtime and discarding the
+    per-exit cool-downs the rotation logic just learned. Keeping the pick
+    stable for a UTC day means reloads happen only when the pool really
+    changes, and the daily rotation lines up with the free allowance reset.
+    """
+    day = (now or datetime.datetime.now(datetime.timezone.utc)).date().isoformat()
+    return int.from_bytes(hashlib.sha256(day.encode()).digest()[:8], "big")
+
+
 def select(
     entries: list[tuple[int, str]], per_port: int, seed: int | None
 ) -> list[str]:
@@ -84,7 +99,12 @@ def select(
 
 
 def atomic_write(path: str, lines: list[str]) -> bool:
-    """Write lines atomically, 0600. Return True when content changed."""
+    """Write lines atomically, 0644. Return True when content changed.
+
+    0644 (not 0600) is required: the gateway container runs as the unprivileged
+    opencode2api user and must be able to read the bind-mounted file. The file
+    lives under /root (0700), so other host users cannot reach it anyway.
+    """
     body = "\n".join(lines) + ("\n" if lines else "")
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
@@ -98,7 +118,7 @@ def atomic_write(path: str, lines: list[str]) -> bool:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(body)
-        os.chmod(tmp, 0o600)
+        os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -136,6 +156,11 @@ def main() -> int:
         "--reload", action="store_true", help="send SIGHUP when the file changed"
     )
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--rotate-now",
+        action="store_true",
+        help="pick fresh credentials now instead of the stable daily seed",
+    )
     args = ap.parse_args()
 
     try:
@@ -152,7 +177,8 @@ def main() -> int:
         )
         return 1
 
-    lines = select(entries, args.per_port, seed=None)
+    seed = None if args.rotate_now else daily_seed()
+    lines = select(entries, args.per_port, seed=seed)
     log(
         f"fetched {len(entries)} proxies across {len(ports)} ports; selected {len(lines)}"
     )
