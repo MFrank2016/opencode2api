@@ -75,6 +75,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("PATCH /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
 	mux.Handle("DELETE /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteAPIKey))))
 	mux.Handle("POST /api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
+	mux.Handle("GET /api/usage", a.authenticate(http.HandlerFunc(a.handleUsage)))
 	mux.Handle("GET /api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
 	mux.Handle("GET /api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
 	mux.Handle("/", a.staticHandler())
@@ -245,6 +246,12 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"result": result, "config": a.configView()})
+}
+
+// handleUsage returns the per-server-key lifetime and last-hour usage counters.
+func (a *Server) handleUsage(w http.ResponseWriter, _ *http.Request) {
+	lifetime, window := a.monitor.ServerKeyUsage()
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"lifetime": lifetime, "last_hour": window})
 }
 
 // handleReload re-reads config.json and applies it, so an edit made on disk

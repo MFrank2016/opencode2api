@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -57,6 +58,11 @@ func main() {
 	redactor.Replace(cfg)
 	logger := telemetry.StructuredLogger(level, hub, redactor)
 	monitor := telemetry.Monitor()
+	usagePath := filepath.Join(filepath.Dir(*configPath), "usage.json")
+	if err := monitor.LoadUsage(usagePath); err != nil {
+		logger.Warn("usage snapshot not loaded", "component", "telemetry", "event", "usage_load_failed", "path", usagePath, "error", err)
+	}
+	monitor.StartUsageSaver(ctx, usagePath, time.Minute, logger)
 	manager, err := gateway.RuntimeManager(ctx, *configPath, cfg, logger, monitor, hub, redactor, level)
 	if err != nil {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)
