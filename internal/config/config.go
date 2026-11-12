@@ -263,6 +263,13 @@ type PerformanceConfig struct {
 	// shares one allowance across every exit; enable only with a proxy pool
 	// whose exits genuinely land in different allowance buckets.
 	FreeLimitRotation bool `json:"free_limit_rotation"`
+	// StreamEmptyRetryMax bounds how many empty streams (200 + text/event-stream
+	// followed by EOF before the first data event) one request absorbs before
+	// giving up. Zero means the default of one retry; a negative value means no
+	// bound beyond max_anonymous_exits / retry.max_attempts. Only effective
+	// when first_event_timeout_seconds is positive, because the empty stream is
+	// detected while waiting for that first event.
+	StreamEmptyRetryMax int `json:"stream_empty_retry_max"`
 	// FreeTierBlockSeconds is how long an exit the free tier flagged as
 	// abusive stays out of the anonymous cursor. Upstream does not publish
 	// the block duration, so the default is a conservative 15 minutes.

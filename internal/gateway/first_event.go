@@ -68,6 +68,34 @@ func upstreamAccepted(err error) bool {
 	return errors.As(err, &pe) && pe.phase == "first_event"
 }
 
+// errEmptyStream reports that the upstream accepted the request and then ended
+// the SSE stream before the first data event. Nothing has been written
+// downstream yet, so the attempt is safe to retry on another exit or key.
+func isEmptyStreamError(err error) bool {
+	if err == nil || !errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+	var pe *phasedError
+	return errors.As(err, &pe) && pe.phase == "first_event"
+}
+
+// streamEmptyRetryMax returns how many empty streams one request may absorb.
+// Zero selects the default of one retry; a negative value means no explicit
+// bound beyond the pool's own attempt limit.
+func (g *Gateway) streamEmptyRetryMax() int {
+	if g == nil {
+		return 1
+	}
+	switch n := g.cfg.Performance.StreamEmptyRetryMax; {
+	case n < 0:
+		return int(^uint(0) >> 1)
+	case n == 0:
+		return 1
+	default:
+		return n
+	}
+}
+
 // phasedError carries the phase an attempt died in. Unwrap keeps the original
 // error, so existing errors.Is checks keep working.
 type phasedError struct {

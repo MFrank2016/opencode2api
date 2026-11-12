@@ -197,11 +197,11 @@ func newTierGatewayWithBody(status int, body string, zenKeys, goKeys []string) (
 	}
 	transports := &proxyTransports{items: proxies}
 	cooldown := 15 * time.Second
-	zenNodes, err := nodePool(zenKeys, transports, cooldown)
+	zenNodes, err := nodePool(zenKeys, transports, cooldown, nil)
 	if err != nil {
 		return nil, err
 	}
-	goNodes, err := nodePool(goKeys, transports, cooldown)
+	goNodes, err := nodePool(goKeys, transports, cooldown, nil)
 	if err != nil {
 		return nil, err
 	}

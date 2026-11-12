@@ -501,6 +501,10 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 	}
 	proxies := 0
 	attempts := 0
+	// emptyStreams counts upstreams that accepted the request and then ended
+	// the SSE stream before the first event. They are retried on another exit
+	// up to stream_empty_retry_max times.
+	emptyStreams := 0
 	rawBody := bodies[config.TierZen]
 	if len(rawBody) == 0 {
 		return nil, errors.New("no prepared Zen request body"), 0
@@ -653,6 +657,15 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			if index+1 < len(upstreams) && !node.proxy.healthy.Load() {
 				break
 			}
+		}
+		if isEmptyStreamError(nodeErr) {
+			emptyStreams++
+			if emptyStreams > g.streamEmptyRetryMax() {
+				lastErr = nodeErr
+				g.logger.Warn("stream ended before the first event; retry budget exhausted", "component", "upstream", "event", "empty_stream_exhausted", "request_id", ids.Request, "attempt", attempts, "empty_streams", emptyStreams, "tier", config.TierZen)
+				break
+			}
+			g.logger.Warn("stream ended before the first event; retrying on another exit", "component", "upstream", "event", "empty_stream_retry", "request_id", ids.Request, "attempt", attempts, "empty_streams", emptyStreams, "tier", config.TierZen)
 		}
 		if rotatedFreeLimit {
 			// The exhausted exit has been cooled and the cursor skips it now.
@@ -1139,6 +1152,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 	if _, pinned := relayOverrideFrom(ctx); pinned {
 		attemptLimit = 1
 	}
+	emptyStreams := 0
 	for attempts < attemptLimit {
 		if ctx.Err() != nil {
 			// Same guard as the anonymous loop: an exhausted request budget
@@ -1251,6 +1265,14 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			lastErr = err
 		} else {
 			lastErr = asProxyUnavailable(proxy, err)
+		}
+		if isEmptyStreamError(err) {
+			emptyStreams++
+			if emptyStreams > g.streamEmptyRetryMax() {
+				g.logger.Warn("stream ended before the first event; retry budget exhausted", "component", "upstream", "event", "empty_stream_exhausted", "request_id", ids.Request, "attempt", attempts, "empty_streams", emptyStreams, "tier", route.Tier)
+				break
+			}
+			g.logger.Warn("stream ended before the first event; retrying on another key", "component", "upstream", "event", "empty_stream_retry", "request_id", ids.Request, "attempt", attempts, "empty_streams", emptyStreams, "tier", route.Tier)
 		}
 		if err != nil {
 			g.logger.Debug("upstream transport attempt failed", "component", "upstream", "event", "attempt_transport_failed", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "proxy", proxyLabel, "duration_ms", attemptDuration.Milliseconds(), "error", err)
