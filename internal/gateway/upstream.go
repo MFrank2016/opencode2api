@@ -607,6 +607,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			// loop ends after trying each usable exit once and still hands the
 			// last 429 (with its Retry-After) to the client.
 			if err == nil && peekFreeUsageLimit(resp) {
+				g.monitor.RecordFreeLimit()
 				lastResponse, lastErr = resp, errFreeUsageLimit
 				quotaExhausted = true
 				if g.cfg.Performance.FreeLimitRotation {
@@ -1246,6 +1247,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		// through the rest of the pool, which only multiplied the requests and
 		// the latency by the number of keys left.
 		if peekFreeUsageLimit(resp) {
+			g.monitor.RecordFreeLimit()
 			g.logger.Warn("free tier allowance exhausted; not rotating keys", "component", "upstream", "event", "free_usage_limit", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "status", resp.StatusCode, "retry_after", resp.Header.Get("Retry-After"))
 			return resp, nil, attempts
 		}

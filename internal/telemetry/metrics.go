@@ -283,6 +283,7 @@ type Metrics struct {
 	total           atomic.Uint64
 	success         atomic.Uint64
 	errors          atomic.Uint64
+	freeLimitEvents atomic.Uint64
 	mu              sync.Mutex
 	buckets         [60]metricBucket
 	lifetimeUsage   UsagePeriod
@@ -303,6 +304,22 @@ func Monitor() *Metrics {
 		recentRequests:  upstreamRequestRing(),
 		recentAttempts:  upstreamAttemptRing(),
 	}
+}
+
+// RecordFreeLimit counts one upstream exhausted-allowance answer.
+func (m *Metrics) RecordFreeLimit() {
+	if m != nil {
+		m.freeLimitEvents.Add(1)
+	}
+}
+
+// FreeLimitEvents returns how many exhausted-allowance answers were seen since
+// the process started.
+func (m *Metrics) FreeLimitEvents() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.freeLimitEvents.Load()
 }
 
 // BeginStream records a stream entering its response body phase.

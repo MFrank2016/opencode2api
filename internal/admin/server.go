@@ -125,6 +125,7 @@ type ConfigView struct {
 	Prefer        config.Tier              `json:"prefer"`
 	Reasoning     config.ReasoningConfig   `json:"reasoning"`
 	WebUI         WebUIView                `json:"webui"`
+	Metrics       config.MetricsConfig     `json:"metrics"`
 	Effective     EffectiveView            `json:"effective"`
 	Restart       []string                 `json:"restart_required_fields,omitempty"`
 }
@@ -176,6 +177,7 @@ type ConfigUpdate struct {
 	// current reasoning configuration) from an explicit empty object (clear it).
 	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
 	WebUI     WebUIView               `json:"webui"`
+	Metrics   config.MetricsConfig    `json:"metrics"`
 }
 
 // handleGetConfig answers with the current configuration, secrets masked.
@@ -231,6 +233,7 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		Upstream:      update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
+		Metrics:   update.Metrics,
 	}
 	result, err := a.manager.Apply(candidate, true)
 	if err != nil {

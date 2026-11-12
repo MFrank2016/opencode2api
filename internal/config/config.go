@@ -43,6 +43,7 @@ type Config struct {
 	Performance       PerformanceConfig            `json:"performance"`
 	Logging           LoggingConfig                `json:"logging"`
 	WebUI             WebUIConfig                  `json:"webui"`
+	Metrics           MetricsConfig                `json:"metrics"`
 	Prefer            Tier                         `json:"prefer"`
 	Reasoning         ReasoningConfig              `json:"reasoning"`
 
@@ -234,6 +235,14 @@ type WebUIConfig struct {
 	SessionTTLMinutes int    `json:"session_ttl_minutes"`
 }
 
+// MetricsConfig enables the Prometheus text endpoint. It is off by default;
+// when enabled without a token it accepts loopback callers only.
+type MetricsConfig struct {
+	Enabled bool   `json:"enabled"`
+	Token   string `json:"token"`
+	Path    string `json:"path"`
+}
+
 // PerformanceConfig tunes the shared upstream transports and failure
 // handling: the connection pool limits (MaxConnsPerHost 0 means unlimited),
 // the dial timeout, the base cooldown after an upstream key or anonymous
@@ -329,6 +338,7 @@ func Load(path string) (Config, error) {
 		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
 		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
+		Metrics:     MetricsConfig{Path: "/metrics"},
 		Prefer:      TierGo,
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -361,6 +371,17 @@ func Normalize(path string, cfg Config) (Config, error) {
 	// A placeholder copied from the documentation is not a credential. Treating
 	// it as one routes every free-model failure into a 401 from the keyed tier.
 	cfg = DropPlaceholderKeys(cfg)
+	cfg.Metrics.Path = strings.TrimSpace(cfg.Metrics.Path)
+	cfg.Metrics.Token = strings.TrimSpace(cfg.Metrics.Token)
+	if cfg.Metrics.Path == "" {
+		cfg.Metrics.Path = "/metrics"
+	}
+	if !strings.HasPrefix(cfg.Metrics.Path, "/") || strings.ContainsAny(cfg.Metrics.Path, " \t\r\n") {
+		return Config{}, errors.New("metrics.path must start with / and contain no whitespace")
+	}
+	if cfg.Metrics.Path == "/healthz" {
+		return Config{}, errors.New("metrics.path must not be /healthz")
+	}
 	cfg.ProxyFile = strings.TrimSpace(cfg.ProxyFile)
 	if err := resolveProxyFiles(path, &cfg); err != nil {
 		return Config{}, err
