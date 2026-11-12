@@ -64,3 +64,17 @@ func TestModelAliasHonorsTierResolution(t *testing.T) {
 		t.Fatalf("route ID = %q, want real-free", route.ID)
 	}
 }
+
+func TestResolveAliasReturnsTargetOrInput(t *testing.T) {
+	c := catalogWithModels(map[string]int{"real-free": 200000})
+	c.SetAliases(map[string]string{"short": "real-free"})
+	if got := c.ResolveAlias("short"); got != "real-free" {
+		t.Fatalf("ResolveAlias(short) = %q, want real-free", got)
+	}
+	if got := c.ResolveAlias("real-free"); got != "real-free" {
+		t.Fatalf("ResolveAlias(real) = %q, want unchanged", got)
+	}
+	if got := c.ResolveAlias("unknown"); got != "unknown" {
+		t.Fatalf("ResolveAlias(unknown) = %q, want unchanged", got)
+	}
+}

@@ -298,6 +298,12 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			g.handleRotation(w, r, external, payload, id, model)
 			return
 		}
+		// Resolve a model alias before the capability checks, so an alias is
+		// validated against the target's protocol rather than its own name.
+		model = g.catalog.ResolveAlias(model)
+		if meta != nil {
+			meta.Model = model
+		}
 		if !g.catalog.Supported(model) {
 			// A model the catalog has never heard of is a bad model NAME: 404
 			// tells a client to pick a different model. A model the catalog
@@ -587,7 +593,7 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "request body must be a JSON object", "invalid_request_error", "")
 		return
 	}
-	model := jsonutil.StringAt(payload, "model")
+	model := g.catalog.ResolveAlias(jsonutil.StringAt(payload, "model"))
 	if meta := telemetry.MetaFromRequest(r); meta != nil {
 		meta.Model = model
 	}

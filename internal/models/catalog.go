@@ -332,6 +332,15 @@ func (c *ModelCatalog) aliasLocked(model string) string {
 	return model
 }
 
+// ResolveAlias maps a client-facing alias to its catalog model, or returns the
+// name unchanged. Callers that validate a model before routing use it so the
+// alias is checked against the target's capabilities.
+func (c *ModelCatalog) ResolveAlias(model string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.aliasLocked(model)
+}
+
 func (c *ModelCatalog) Route(model string, hasZenKeys, hasGoKeys, hasAnonymous bool) (Route, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
