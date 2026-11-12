@@ -85,6 +85,9 @@ type ModelCatalog struct {
 	// example it lists 200k for models that actually accept 1M), so operators
 	// can correct the value that discovery clients see.
 	contextOverrides map[string]int
+	// aliases maps a client-facing name to a catalog model. Single level only:
+	// a target that is itself an alias is treated as a plain (missing) name.
+	aliases map[string]string
 	// maxOutputOverrides replaces the advertised maximum output for the named
 	// models, for the same reason as contextOverrides: the catalog understates
 	// the free tier's output budget.
@@ -301,9 +304,38 @@ func (c *ModelCatalog) CopyState(source *ModelCatalog) {
 // the fallback, the key tiers are tried in prefer order. It fails when the probes
 // disabled the model, when models.free_only hides it, or when no lane or tier
 // can serve it.
+// SetAliases replaces the model alias map. Empty and self-referential entries
+// are dropped, and a target is never expanded again (single level only), so a
+// mistyped alias cannot loop.
+func (c *ModelCatalog) SetAliases(aliases map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.aliases = make(map[string]string, len(aliases))
+	for from, to := range aliases {
+		from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+		if from == "" || to == "" || from == to {
+			continue
+		}
+		c.aliases[from] = to
+	}
+}
+
+// aliasLocked maps a client-facing name to its target. The caller holds the
+// read lock.
+func (c *ModelCatalog) aliasLocked(model string) string {
+	if c.aliases == nil {
+		return model
+	}
+	if target, ok := c.aliases[model]; ok {
+		return target
+	}
+	return model
+}
+
 func (c *ModelCatalog) Route(model string, hasZenKeys, hasGoKeys, hasAnonymous bool) (Route, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	model = c.aliasLocked(model)
 	return c.routeLocked(model, hasZenKeys, hasGoKeys, hasAnonymous)
 }
 
@@ -416,6 +448,7 @@ func (c *ModelCatalog) RouteForTier(model string, tier config.Tier, hasZenKeys, 
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	model = c.aliasLocked(model)
 	if c.availability != nil && c.availability.Disabled(model) {
 		return Route{}, fmt.Errorf("model %q is disabled after a failed availability check", model)
 	}

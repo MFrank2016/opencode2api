@@ -133,6 +133,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics, war
 	catalog.SetFreeOnly(cfg.Models.FreeOnly)
 	catalog.SetContextOverrides(cfg.Models.Context)
 	catalog.SetMaxOutputOverrides(cfg.Models.MaxOutput)
+	catalog.SetAliases(cfg.Models.Aliases)
 	var identityPool *identity.Pool
 	if cfg.Identity.Enabled {
 		identityPool = identity.NewPool(identity.PoolOptions{
@@ -179,6 +180,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", g.authenticate(g.handleInference(wire.Chat)))
 	mux.HandleFunc("POST /v1/responses", g.authenticate(g.handleInference(wire.Responses)))
 	mux.HandleFunc("POST /v1/messages", g.authenticate(g.handleInference(wire.Anthropic)))
+	mux.HandleFunc("POST /v1/messages/count_tokens", g.authenticate(g.handleCountTokens))
 	mux.HandleFunc("POST /v1/systemone", g.authenticate(g.handleSystemOne))
 	mux.HandleFunc("GET /healthz", g.handleHealth)
 	if g.cfg.Metrics.Enabled {

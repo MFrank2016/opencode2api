@@ -165,6 +165,9 @@ type ModelsConfig struct {
 	// MaxOutput overrides the advertised maximum output (in tokens) for the named
 	// models. Same purpose as Context: the catalog understates the free tier.
 	MaxOutput map[string]int `json:"max_output"`
+	// Aliases maps a client-facing model name to a catalog model, so a client
+	// can ask for a short name (deepseek-v4-flash) that routes to the real one.
+	Aliases map[string]string `json:"aliases,omitempty"`
 	// ActiveProbes enables background active inference requests for free model
 	// health checks. When false (default), availability is learned passively
 	// from actual user requests, eliminating quota consumption from synthetic probes.
