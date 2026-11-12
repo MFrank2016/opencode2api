@@ -172,6 +172,7 @@ async function save(event) {
         session_ttl_minutes: numberValue("#c-session"),
       },
       metrics: { ...current.metrics },
+      identity: { ...current.identity },
       proxy_bindings: current.proxy_bindings,
     };
     const result = await api("/api/config", { method: "PUT", body: JSON.stringify(update) });

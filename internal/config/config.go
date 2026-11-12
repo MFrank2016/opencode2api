@@ -44,6 +44,7 @@ type Config struct {
 	Logging           LoggingConfig                `json:"logging"`
 	WebUI             WebUIConfig                  `json:"webui"`
 	Metrics           MetricsConfig                `json:"metrics"`
+	Identity          IdentityPoolConfig           `json:"identity"`
 	Prefer            Tier                         `json:"prefer"`
 	Reasoning         ReasoningConfig              `json:"reasoning"`
 
@@ -235,6 +236,17 @@ type WebUIConfig struct {
 	SessionTTLMinutes int    `json:"session_ttl_minutes"`
 }
 
+// IdentityPoolConfig keeps one stable upstream project id per client bucket
+// for a TTL. Off by default; enable after an A/B shows a cache or quota gain.
+type IdentityPoolConfig struct {
+	Enabled           bool `json:"enabled"`
+	MaxEntries        int  `json:"max_entries"`
+	ProjectTTLSeconds int  `json:"project_ttl_seconds"`
+	// TrustForwarded takes the client IP from X-Forwarded-For. Only enable it
+	// when a trusted reverse proxy overwrites that header.
+	TrustForwarded bool `json:"trust_forwarded"`
+}
+
 // MetricsConfig enables the Prometheus text endpoint. It is off by default;
 // when enabled without a token it accepts loopback callers only.
 type MetricsConfig struct {
@@ -339,6 +351,7 @@ func Load(path string) (Config, error) {
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
 		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
 		Metrics:     MetricsConfig{Path: "/metrics"},
+		Identity:    IdentityPoolConfig{MaxEntries: 2000, ProjectTTLSeconds: 1800},
 		Prefer:      TierGo,
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -371,6 +384,18 @@ func Normalize(path string, cfg Config) (Config, error) {
 	// A placeholder copied from the documentation is not a credential. Treating
 	// it as one routes every free-model failure into a 401 from the keyed tier.
 	cfg = DropPlaceholderKeys(cfg)
+	if cfg.Identity.MaxEntries <= 0 {
+		cfg.Identity.MaxEntries = 2000
+	}
+	if cfg.Identity.ProjectTTLSeconds <= 0 {
+		cfg.Identity.ProjectTTLSeconds = 1800
+	}
+	if cfg.Identity.MaxEntries > 100000 {
+		return Config{}, errors.New("identity.max_entries must not exceed 100000")
+	}
+	if cfg.Identity.ProjectTTLSeconds < 60 || cfg.Identity.ProjectTTLSeconds > 86400 {
+		return Config{}, errors.New("identity.project_ttl_seconds must be between 60 and 86400")
+	}
 	cfg.Metrics.Path = strings.TrimSpace(cfg.Metrics.Path)
 	cfg.Metrics.Token = strings.TrimSpace(cfg.Metrics.Token)
 	if cfg.Metrics.Path == "" {

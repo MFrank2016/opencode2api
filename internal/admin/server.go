@@ -108,26 +108,27 @@ type SecretView struct {
 // masked, plus the listeners that are actually in effect and the fields whose
 // change needs a restart.
 type ConfigView struct {
-	Listen        string                   `json:"listen"`
-	ServerKeys    []SecretView             `json:"server_keys"`
-	ZenKeys       []SecretView             `json:"zen_keys"`
-	GoKeys        []SecretView             `json:"go_keys"`
-	Anonymous     bool                     `json:"anonymous"`
-	Warp          config.WarpConfig        `json:"warp"`
-	Proxies       []SecretView             `json:"proxies"`
-	ProxyFile     string                   `json:"proxyfile"`
-	ProxyBindings map[string]string        `json:"proxy_bindings,omitempty"`
-	Upstream      config.UpstreamConfig    `json:"upstream"`
-	Retry         config.RetryConfig       `json:"retry"`
-	Models        config.ModelsConfig      `json:"models"`
-	Performance   config.PerformanceConfig `json:"performance"`
-	Logging       config.LoggingConfig     `json:"logging"`
-	Prefer        config.Tier              `json:"prefer"`
-	Reasoning     config.ReasoningConfig   `json:"reasoning"`
-	WebUI         WebUIView                `json:"webui"`
-	Metrics       config.MetricsConfig     `json:"metrics"`
-	Effective     EffectiveView            `json:"effective"`
-	Restart       []string                 `json:"restart_required_fields,omitempty"`
+	Listen        string                    `json:"listen"`
+	ServerKeys    []SecretView              `json:"server_keys"`
+	ZenKeys       []SecretView              `json:"zen_keys"`
+	GoKeys        []SecretView              `json:"go_keys"`
+	Anonymous     bool                      `json:"anonymous"`
+	Warp          config.WarpConfig         `json:"warp"`
+	Proxies       []SecretView              `json:"proxies"`
+	ProxyFile     string                    `json:"proxyfile"`
+	ProxyBindings map[string]string         `json:"proxy_bindings,omitempty"`
+	Upstream      config.UpstreamConfig     `json:"upstream"`
+	Retry         config.RetryConfig        `json:"retry"`
+	Models        config.ModelsConfig       `json:"models"`
+	Performance   config.PerformanceConfig  `json:"performance"`
+	Logging       config.LoggingConfig      `json:"logging"`
+	Prefer        config.Tier               `json:"prefer"`
+	Reasoning     config.ReasoningConfig    `json:"reasoning"`
+	WebUI         WebUIView                 `json:"webui"`
+	Metrics       config.MetricsConfig      `json:"metrics"`
+	Identity      config.IdentityPoolConfig `json:"identity"`
+	Effective     EffectiveView             `json:"effective"`
+	Restart       []string                  `json:"restart_required_fields,omitempty"`
 }
 
 // EffectiveView is the set of listeners the running process actually bound,
@@ -175,9 +176,10 @@ type ConfigUpdate struct {
 	Prefer        config.Tier              `json:"prefer"`
 	// A pointer distinguishes an omitted field (legacy clients should keep the
 	// current reasoning configuration) from an explicit empty object (clear it).
-	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
-	WebUI     WebUIView               `json:"webui"`
-	Metrics   config.MetricsConfig    `json:"metrics"`
+	Reasoning *config.ReasoningConfig   `json:"reasoning,omitempty"`
+	WebUI     WebUIView                 `json:"webui"`
+	Metrics   config.MetricsConfig      `json:"metrics"`
+	Identity  config.IdentityPoolConfig `json:"identity"`
 }
 
 // handleGetConfig answers with the current configuration, secrets masked.
@@ -234,6 +236,7 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 		Metrics:   update.Metrics,
+		Identity:  update.Identity,
 	}
 	result, err := a.manager.Apply(candidate, true)
 	if err != nil {

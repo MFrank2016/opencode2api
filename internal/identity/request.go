@@ -47,6 +47,13 @@ type RequestIDs struct {
 // provider, preferred key, or anonymous proxy. An official OpenCode session is
 // kept verbatim because the client minted it uniquely.
 func DeriveRequestIDs(r *http.Request, body map[string]any, scope string) RequestIDs {
+	return DeriveRequestIDsWithPool(r, body, scope, nil, "")
+}
+
+// DeriveRequestIDsWithPool is DeriveRequestIDs with an optional project pool.
+// When the client names no project and pool is non-nil, the project comes from
+// the pool keyed by (scope, clientKey) instead of being minted per request.
+func DeriveRequestIDsWithPool(r *http.Request, body map[string]any, scope string, pool *Pool, clientKey string) RequestIDs {
 	signal := jsonutil.FirstString(
 		r.Header.Get("x-opencode-session"),
 		r.Header.Get("x-opencode-session-id"),
@@ -79,11 +86,16 @@ func DeriveRequestIDs(r *http.Request, body map[string]any, scope string) Reques
 	}
 	projectSignal := jsonutil.FirstString(r.Header.Get("x-opencode-project"), jsonutil.StringAt(body, "metadata", "project_id"))
 	if projectSignal == "" {
-		// A fresh project id per request. The free tier ledges its quota per
-		// project id and egress, so one shared id is one shared bucket: the old
-		// per-caller default arrived pre-burned on popular exits. A client that
-		// names its project keeps that name.
-		projectSignal = RandomProjectID()
+		// A client that names its project keeps that name. Otherwise the
+		// optional pool supplies a stable id for this caller and client
+		// bucket; without it, a fresh id per request keeps the historical
+		// behavior.
+		if pool != nil {
+			projectSignal = pool.Project(scope, clientKey)
+		}
+		if projectSignal == "" {
+			projectSignal = RandomProjectID()
+		}
 	}
 	parentSession := jsonutil.FirstString(
 		r.Header.Get("x-parent-session-id"),

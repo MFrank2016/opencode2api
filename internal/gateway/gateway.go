@@ -86,6 +86,9 @@ type Gateway struct {
 	catalog      *models.ModelCatalog
 	monitor      *telemetry.Metrics
 	availability *models.AvailabilityRegistry
+	// identityPool, when non-nil, keeps one stable project id per client
+	// bucket. It never changes the session, which drives the exit cursor.
+	identityPool *identity.Pool
 	// attemptTimeout bounds a whole upstream attempt (dial + write + headers
 	// and, when the first-event wait is enabled, the first event), not just
 	// the header wait. Zero arms no per-attempt deadline: each attempt is then
@@ -130,6 +133,13 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics, war
 	catalog.SetFreeOnly(cfg.Models.FreeOnly)
 	catalog.SetContextOverrides(cfg.Models.Context)
 	catalog.SetMaxOutputOverrides(cfg.Models.MaxOutput)
+	var identityPool *identity.Pool
+	if cfg.Identity.Enabled {
+		identityPool = identity.NewPool(identity.PoolOptions{
+			MaxEntries: cfg.Identity.MaxEntries,
+			TTL:        time.Duration(cfg.Identity.ProjectTTLSeconds) * time.Second,
+		})
+	}
 	return &Gateway{
 		cfg:            cfg,
 		rotation:       rotationManager,
@@ -143,6 +153,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics, war
 		monitor:        monitor,
 		attemptTimeout: attemptDeadline(cfg),
 		freeTierBlock:  time.Duration(cfg.Performance.FreeTierBlockSeconds) * time.Second,
+		identityPool:   identityPool,
 	}, nil
 }
 
@@ -333,7 +344,7 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "")
 			return
 		}
-		ids := identity.DeriveRequestIDs(r, payload, callerScope(r.Context()))
+		ids := g.deriveRequestIDs(r, payload, callerScope(r.Context()))
 		if meta != nil {
 			meta.Request = ids.Request
 			meta.Session = ids.Session
@@ -624,7 +635,7 @@ func (g *Gateway) forwardSystemOne(w http.ResponseWriter, r *http.Request, body 
 	for _, tier := range route.KeyTiers {
 		bodies[tier] = body
 	}
-	ids := identity.DeriveRequestIDs(r, payload, callerScope(r.Context()))
+	ids := g.deriveRequestIDs(r, payload, callerScope(r.Context()))
 	if meta != nil {
 		meta.Request = ids.Request
 		meta.Session = ids.Session
