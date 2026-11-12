@@ -1,41 +1,54 @@
-/* Buttons, forms, sections, tables, status, chips, dialogs and shared primitives. */
+/* Buttons, forms, cards, tables, status, chips, dialogs and shared primitives. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--border-2);
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--border-1);
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text-1);
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
+  box-shadow: var(--shadow-1);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease,
+    border-color 0.16s ease,
+    background-color 0.16s ease;
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--bg-subtle);
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
 
 .btn-primary {
-  border-color: var(--inverse-bg);
-  background: var(--inverse-bg);
-  color: var(--inverse-text);
+  border-color: transparent;
+  background: var(--gradient-accent);
+  color: var(--accent-contrast);
+  box-shadow: var(--shadow-glow);
 }
 
 .btn-primary:hover:not(:disabled) {
-  border-color: var(--inverse-hover);
-  background: var(--inverse-hover);
+  border-color: transparent;
+  background: var(--gradient-accent);
+  filter: brightness(1.05) saturate(1.03);
+  transform: translateY(-1px);
 }
 
 .btn-danger {
-  border-color: var(--border-2);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--border-1));
   color: var(--bad);
 }
 
@@ -48,16 +61,19 @@
   border-color: transparent;
   background: transparent;
   color: var(--text-2);
+  box-shadow: none;
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: var(--bg-subtle);
+  border-color: transparent;
+  background: var(--accent-wash);
   color: var(--text-1);
+  box-shadow: none;
 }
 
 .btn-sm {
-  height: 30px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 12px;
   font-size: var(--fs-sm);
 }
 
@@ -68,10 +84,11 @@
 
 .lang-switch {
   width: auto;
-  height: 30px;
+  height: 32px;
   padding: 0 8px;
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
   appearance: none;
   font-size: 16px;
   line-height: 1;
@@ -80,7 +97,7 @@
 }
 
 .lang-switch:hover {
-  background: var(--bg-subtle);
+  background: var(--accent-wash);
 }
 
 .login-lang {
@@ -97,7 +114,7 @@
 
 .field > label {
   font-size: var(--fs-sm);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-2);
 }
 
@@ -106,18 +123,29 @@ select,
 textarea {
   width: 100%;
   min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-2);
+  padding: 10px 12px;
+  border: 1px solid var(--border-1);
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: var(--surface-2);
   outline: none;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-2);
 }
 
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--text-1);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-color: var(--accent-strong);
+  background: var(--surface);
+  box-shadow: 0 0 0 4px var(--focus-ring);
 }
 
 input:focus-visible,
@@ -127,11 +155,11 @@ textarea:focus-visible {
 }
 
 textarea {
-  min-height: 92px;
+  min-height: 96px;
   resize: vertical;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .check {
@@ -144,7 +172,7 @@ textarea {
 .check input {
   width: auto;
   flex-shrink: 0;
-  accent-color: var(--inverse-bg);
+  accent-color: var(--accent-strong);
 }
 
 .form-grid {
@@ -165,10 +193,17 @@ textarea {
 }
 
 .section {
-  padding: var(--sp-5);
+  position: relative;
+  padding: var(--sp-6);
   border: 1px solid var(--border-1);
   border-radius: var(--r-lg);
   background: var(--surface);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow 0.18s ease;
+}
+
+.section:hover {
+  box-shadow: var(--shadow-2);
 }
 
 .section-head {
@@ -177,22 +212,25 @@ textarea {
   justify-content: space-between;
   gap: var(--sp-4);
   margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
 }
 
 .section-title {
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
 .section-caption {
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
 
 .table-wrap {
   overflow-x: auto;
+  border-radius: var(--r-md);
 }
 
 .table {
@@ -203,7 +241,7 @@ textarea {
 
 .table th,
 .table td {
-  padding: 8px 10px;
+  padding: 10px 12px;
   text-align: left;
   vertical-align: baseline;
   border-bottom: 1px solid var(--border-1);
@@ -211,9 +249,11 @@ textarea {
 }
 
 .table th {
-  padding-block: 6px;
-  font-size: var(--fs-xs);
-  font-weight: 500;
+  padding-block: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
 
@@ -221,8 +261,12 @@ textarea {
   border-bottom: 0;
 }
 
+.table tbody tr {
+  transition: background-color 0.14s ease;
+}
+
 .table tbody tr:hover {
-  background: var(--bg-subtle);
+  background: var(--accent-wash);
 }
 
 .num {
@@ -234,14 +278,16 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-weight: 500;
 }
 
 .status::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 0 8px currentColor;
   flex-shrink: 0;
 }
 
@@ -268,10 +314,10 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 3px 8px;
+  padding: 4px 10px;
   border: 1px solid var(--border-1);
-  border-radius: var(--r-sm);
-  background: var(--bg-subtle);
+  border-radius: 999px;
+  background: var(--surface-2);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
@@ -298,6 +344,7 @@ textarea {
 }
 
 .chip.chip-toggle:hover {
+  border-color: var(--accent);
   color: var(--text-1);
 }
 
@@ -314,11 +361,19 @@ textarea {
   white-space: nowrap;
 }
 
+.pager-size {
+  width: auto;
+  min-width: 76px;
+  height: 32px;
+  padding-block: 0;
+}
+
 .code-card {
   margin: var(--sp-3) 0;
   border: 1px solid var(--border-1);
   border-radius: var(--r-md);
   background: var(--surface-2);
+  box-shadow: var(--shadow-1);
   overflow: hidden;
 }
 
@@ -329,6 +384,7 @@ textarea {
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border-1);
+  background: var(--accent-wash);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--text-3);
@@ -344,7 +400,8 @@ textarea {
 
 .notice {
   padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border-1));
+  border-left: 3px solid var(--warn);
   border-radius: var(--r-md);
   background: var(--warn-bg);
   font-size: var(--fs-sm);
@@ -355,12 +412,13 @@ textarea {
   right: var(--sp-5);
   bottom: var(--sp-5);
   z-index: 60;
-  max-width: 360px;
+  max-width: 380px;
   padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--border-2);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(14px);
   font-size: var(--fs-sm);
 }
 
@@ -376,25 +434,28 @@ textarea {
   place-items: center;
   padding: var(--sp-4);
   background: var(--overlay);
+  backdrop-filter: blur(5px);
 }
 
 .dialog {
-  width: min(440px, 100%);
+  width: min(460px, 100%);
   max-height: 84vh;
   overflow: auto;
-  padding: var(--sp-5);
-  border: 1px solid var(--border-2);
-  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-xl);
   background: var(--surface);
+  box-shadow: var(--shadow-2);
 }
 
 .dialog-lg {
-  width: min(720px, 100%);
+  width: min(740px, 100%);
 }
 
 .dialog-title {
-  font-size: var(--fs-lg);
-  font-weight: 600;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
 .dialog-text {
@@ -440,7 +501,10 @@ textarea {
 }
 
 .fact-label {
-  font-size: var(--fs-xs);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
 
@@ -450,9 +514,10 @@ textarea {
 }
 
 .empty {
-  padding: var(--sp-4) var(--sp-2);
+  padding: var(--sp-5) var(--sp-2);
   color: var(--text-3);
   font-size: var(--fs-sm);
+  text-align: center;
 }
 
 .actions {
@@ -480,23 +545,23 @@ progress {
   height: 8px;
   border: 0;
   border-radius: 999px;
-  background: var(--bg-subtle);
+  background: var(--surface-3);
   overflow: hidden;
   appearance: none;
 }
 
 progress::-webkit-progress-bar {
-  background: var(--bg-subtle);
+  background: var(--surface-3);
 }
 
 progress::-webkit-progress-value {
   border-radius: 999px;
-  background: var(--inverse-bg);
+  background: var(--gradient-accent);
 }
 
 progress::-moz-progress-bar {
   border-radius: 999px;
-  background: var(--inverse-bg);
+  background: var(--gradient-accent);
 }
 
 @media (max-width: 680px) {
@@ -526,21 +591,29 @@ progress::-moz-progress-bar {
 }
 
 .tabs {
-  display: flex;
-  gap: var(--sp-1);
-  border-bottom: 1px solid var(--border-1);
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: var(--surface-2);
   overflow-x: auto;
+  max-width: 100%;
 }
 
 .tab {
-  padding: 7px var(--sp-3) 9px;
-  margin-bottom: -1px;
+  padding: 7px 16px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-2);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
+  font-weight: 500;
   white-space: nowrap;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .tab:hover {
@@ -549,8 +622,13 @@ progress::-moz-progress-bar {
 
 .tab.active {
   color: var(--text-1);
-  border-bottom-color: var(--text-1);
-  font-weight: 500;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .tab.active {
+  background: var(--surface-3);
 }
 
 .sticky-actions {
@@ -563,5 +641,6 @@ progress::-moz-progress-bar {
   margin-top: var(--sp-4);
   padding: var(--sp-3) 0;
   border-top: 1px solid var(--border-1);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(12px);
 }

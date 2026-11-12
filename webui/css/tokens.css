@@ -1,40 +1,65 @@
-/* Design tokens: monochrome scale, semantic status colors, type and spacing. */
+/* Design tokens: warm neutral scale, amber accent, semantic status colors. */
 :root {
   color-scheme: light;
 
-  --bg: #fafafa;
-  --bg-subtle: #f1f1f1;
+  --bg: #f6f4ef;
+  --bg-subtle: #efece3;
   --surface: #ffffff;
-  --surface-2: #fafafa;
-  --text-1: #0a0a0a;
-  --text-2: #5e5e5e;
-  --text-3: #8f8f8f;
-  --border-1: #e6e6e6;
-  --border-2: #d4d4d4;
-  --inverse-bg: #0a0a0a;
+  --surface-2: #faf8f3;
+  --surface-3: #f3efe6;
+  --text-1: #181510;
+  --text-2: #5f584c;
+  --text-3: #6f6657;
+  --border-1: #e7e1d5;
+  --border-2: #d6cdbc;
+  --inverse-bg: #181510;
   --inverse-text: #ffffff;
-  --inverse-hover: #333333;
-  --focus-ring: rgba(10, 10, 10, 0.14);
-  --overlay: rgba(0, 0, 0, 0.45);
+  --inverse-hover: #33302a;
+  --focus-ring: rgba(240, 177, 0, 0.32);
+  --overlay: rgba(24, 21, 16, 0.48);
 
-  --ok: #1a7f37;
-  --warn: #9a6700;
-  --warn-bg: #fff8c5;
-  --bad: #cf222e;
-  --bad-bg: #ffebe9;
+  /* Warm amber accent: golden base with an orange edge for gradients. */
+  --accent: #f0b100;
+  --accent-strong: #d99a00;
+  --accent-2: #ff8a3d;
+  --accent-contrast: #1d1600;
+  --accent-soft: rgba(240, 177, 0, 0.14);
+  --accent-soft-2: rgba(255, 138, 61, 0.12);
+  --accent-ring: rgba(240, 177, 0, 0.34);
+  --accent-wash: rgba(240, 177, 0, 0.07);
+  --gradient-accent: linear-gradient(
+    135deg,
+    #ffd15c 0%,
+    #f0b100 52%,
+    #ff8a3d 100%
+  );
+  --gradient-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.7),
+    rgba(255, 255, 255, 0)
+  );
+
+  --ok: #1f7a4d;
+  --warn: #b45309;
+  --warn-bg: #fff4e5;
+  --bad: #c0362c;
+  --bad-bg: #ffefed;
 
   --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
 
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs-base: 14px;
   --fs-lg: 16px;
-  --fs-2xl: 24px;
-  --fs-3xl: 30px;
+  --fs-xl: 19px;
+  --fs-2xl: 26px;
+  --fs-3xl: 34px;
 
   --lh-base: 1.6;
 
@@ -48,12 +73,20 @@
   --sp-10: 40px;
   --sp-12: 48px;
 
-  --r-sm: 4px;
-  --r-md: 6px;
-  --r-lg: 10px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
 
-  --sidebar-w: 232px;
-  --content-max: 1280px;
+  --shadow-1:
+    0 1px 2px rgba(60, 45, 10, 0.06), 0 10px 28px -18px rgba(60, 45, 10, 0.22);
+  --shadow-2:
+    0 2px 4px rgba(60, 45, 10, 0.07), 0 20px 44px -20px rgba(60, 45, 10, 0.32);
+  --shadow-glow:
+    0 0 0 1px rgba(240, 177, 0, 0.22), 0 10px 32px -12px rgba(240, 177, 0, 0.45);
+
+  --sidebar-w: 240px;
+  --content-max: 1320px;
 }
 
 /* The theme module (webui/js/theme.js) resolves the stored choice and the
@@ -61,24 +94,53 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0a0a0a;
-  --bg-subtle: #171717;
-  --surface: #121212;
-  --surface-2: #0d0d0d;
-  --text-1: #ededed;
-  --text-2: #a0a0a0;
-  --text-3: #787878;
-  --border-1: #262626;
-  --border-2: #3a3a3a;
-  --inverse-bg: #ededed;
-  --inverse-text: #0a0a0a;
-  --inverse-hover: #cfcfcf;
-  --focus-ring: rgba(237, 237, 237, 0.18);
-  --overlay: rgba(0, 0, 0, 0.6);
+  --bg: #0e0c08;
+  --bg-subtle: #17140e;
+  --surface: #17140e;
+  --surface-2: #1e1a12;
+  --surface-3: #241f15;
+  --text-1: #f6f1e6;
+  --text-2: #b9b0a0;
+  --text-3: #968c7b;
+  --border-1: #2a251b;
+  --border-2: #3b3426;
+  --inverse-bg: #f6f1e6;
+  --inverse-text: #17140e;
+  --inverse-hover: #ded5c2;
+  --focus-ring: rgba(255, 201, 77, 0.34);
+  --overlay: rgba(0, 0, 0, 0.62);
 
-  --ok: #3fb950;
-  --warn: #d29922;
-  --warn-bg: rgba(210, 153, 34, 0.15);
-  --bad: #f85149;
-  --bad-bg: rgba(248, 81, 73, 0.15);
+  --accent: #ffc94d;
+  --accent-strong: #ffb703;
+  --accent-2: #ff8a3d;
+  --accent-contrast: #1d1600;
+  --accent-soft: rgba(255, 201, 77, 0.14);
+  --accent-soft-2: rgba(255, 138, 61, 0.12);
+  --accent-ring: rgba(255, 201, 77, 0.36);
+  --accent-wash: rgba(255, 201, 77, 0.07);
+  --gradient-accent: linear-gradient(
+    135deg,
+    #ffe08a 0%,
+    #ffc94d 52%,
+    #ff8a3d 100%
+  );
+  --gradient-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0)
+  );
+
+  --ok: #4ac27a;
+  --warn: #f0a44b;
+  --warn-bg: rgba(240, 164, 75, 0.14);
+  --bad: #ff6b5e;
+  --bad-bg: rgba(255, 107, 94, 0.14);
+
+  --shadow-1:
+    0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 32px -20px rgba(0, 0, 0, 0.85);
+  --shadow-2:
+    0 2px 4px rgba(0, 0, 0, 0.5), 0 24px 52px -24px rgba(0, 0, 0, 0.95);
+  --shadow-glow:
+    0 0 0 1px rgba(255, 201, 77, 0.24),
+    0 12px 36px -14px rgba(255, 201, 77, 0.4);
 }
