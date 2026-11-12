@@ -270,6 +270,8 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 	payload["tools"] = shaped
 	officialNames := officialToolNames(v1)
 	bindOfficialToolAliases(renames, declaredNames, officialNames)
+	renames.SetDeclared(declaredNames)
+	renames.SetManifest(officialNames)
 	declared := make(map[string]string, len(declaredNames))
 	for _, name := range declaredNames {
 		if wireName, ok := renames.Wire(name); ok {
@@ -299,6 +301,15 @@ func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames, officialN
 			}
 		}
 	}
+}
+
+// applyToolCallFilter wires the configured reply-side filter into one shaped
+// request's renames.
+func (g *Gateway) applyToolCallFilter(renames *wire.ToolRenames) {
+	if renames == nil {
+		return
+	}
+	renames.SetFilter(wire.ParseToolCallFilter(g.cfg.Performance.ToolCallFilter))
 }
 
 func officialToolNameSet(v1 bool) map[string]bool {

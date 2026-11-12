@@ -241,6 +241,7 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 	renames := make([]*wire.ToolRenames, len(upstreams))
 	for index, baseURL := range upstreams {
 		prepared[index], renames[index] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
+		g.applyToolCallFilter(renames[index])
 	}
 	// A 429 is scoped to the exit that carried it, so the request keeps
 	// rotating exits until the configured attempt budget is spent; only then

@@ -270,6 +270,11 @@ type PerformanceConfig struct {
 	// when first_event_timeout_seconds is positive, because the empty stream is
 	// detected while waiting for that first event.
 	StreamEmptyRetryMax int `json:"stream_empty_retry_max"`
+	// ToolCallFilter selects which upstream tool calls the gateway withholds
+	// from the client. "off" keeps every call; "manifest-only" drops an official
+	// tool the caller declared no equivalent for; "unoffered" also drops names
+	// the model invented. Empty is "off".
+	ToolCallFilter string `json:"tool_call_filter"`
 	// FreeTierBlockSeconds is how long an exit the free tier flagged as
 	// abusive stays out of the anonymous cursor. Upstream does not publish
 	// the block duration, so the default is a conservative 15 minutes.
@@ -410,6 +415,11 @@ func Normalize(path string, cfg Config) (Config, error) {
 	}
 	if cfg.Performance.FreeTierBlockSeconds < 0 {
 		return Config{}, errors.New("performance.free_tier_block_seconds must not be negative (0 uses the built-in cool-down)")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Performance.ToolCallFilter)) {
+	case "", "off", "manifest-only", "manifest_only", "manifest", "unoffered", "strict":
+	default:
+		return Config{}, errors.New(`performance.tool_call_filter must be "off", "manifest-only", or "unoffered"`)
 	}
 	if cfg.Logging.Level != "debug" && cfg.Logging.Level != "info" && cfg.Logging.Level != "warn" && cfg.Logging.Level != "error" {
 		return Config{}, errors.New("logging.level must be debug, info, warn, or error")

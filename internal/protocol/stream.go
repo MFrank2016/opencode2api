@@ -236,12 +236,12 @@ func ForwardStream(ctx context.Context, w http.ResponseWriter, reader io.Reader,
 // through the fragment-aware rewriter, while the other protocols use the
 // stateless RenameResponseTool rewrite on each frame.
 func RenameStreamReader(reader io.Reader, protocol Protocol, renames *ToolRenames) io.Reader {
-	if renames.Empty() {
+	if !renames.Active() {
 		return reader
 	}
 	return &renameStreamReader{
 		buffer:  bufio.NewReaderSize(reader, 64<<10),
-		renamer: &streamToolRenamer{protocol: protocol, renames: renames, tools: map[string]*streamToolRenameState{}},
+		renamer: &streamToolRenamer{protocol: protocol, renames: renames, tools: map[string]*streamToolRenameState{}, droppedBlocks: map[string]bool{}},
 	}
 }
 
@@ -320,6 +320,10 @@ func (reader *renameStreamReader) rewriteLine(line string) []byte {
 		return []byte(line)
 	}
 	rewritten := reader.renamer.rewriteFrame(raw)
+	if rewritten == nil {
+		// The whole event was an upstream tool call the caller cannot execute.
+		return nil
+	}
 	if string(rewritten) == raw {
 		return []byte(line)
 	}
@@ -333,6 +337,7 @@ func (reader *renameStreamReader) rewriteLine(line string) []byte {
 type streamToolRenameState struct {
 	decided          bool
 	renamed          bool
+	dropped          bool
 	pending          string
 	pendingArguments strings.Builder
 	callIndex        any
@@ -347,6 +352,10 @@ type streamToolRenamer struct {
 	renames  *ToolRenames
 	tools    map[string]*streamToolRenameState
 	order    []string
+	// droppedBlocks tracks Anthropic block indexes and Responses item keys whose
+	// tool-call start was withheld, so the matching deltas and stop events are
+	// dropped too instead of describing a block the client never saw.
+	droppedBlocks map[string]bool
 }
 
 // rewriteFrame rewrites one SSE data payload, which is raw JSON text. Frames
@@ -355,17 +364,113 @@ type streamToolRenamer struct {
 // decoded.
 func (renamer *streamToolRenamer) rewriteFrame(raw string) []byte {
 	if renamer.protocol != Chat {
-		// Anthropic and Responses streams always carry a complete tool name in
-		// a single event, so the stateless object rewrite is exact.
-		if !mayCarryToolName([]byte(raw)) {
-			return []byte(raw)
-		}
-		return RenameResponseTool([]byte(raw), renamer.protocol, renamer.renames)
+		return renamer.rewriteNonChatFrame(raw)
 	}
 	if !strings.Contains(raw, `"tool_calls"`) && !strings.Contains(raw, `"finish_reason"`) {
 		return []byte(raw)
 	}
 	return renamer.rewriteChatFrame(raw)
+}
+
+// rewriteNonChatFrame rewrites one Anthropic or Responses SSE event. When the
+// event starts a tool call the caller cannot execute, it returns nil so the
+// event and the deltas that follow it are withheld.
+func (renamer *streamToolRenamer) rewriteNonChatFrame(raw string) []byte {
+	body := []byte(raw)
+	if renamer.renames.HasFilter() {
+		if drop, handled := renamer.filterNonChatFrame(raw); handled && drop {
+			return nil
+		}
+	}
+	if !mayCarryToolName(body) {
+		return body
+	}
+	return RenameResponseTool(body, renamer.protocol, renamer.renames)
+}
+
+// filterNonChatFrame decides whether one Anthropic/Responses event belongs to a
+// tool call that must be withheld. handled reports whether the event was a
+// tool-call lifecycle event the filter understands; drop reports the decision.
+func (renamer *streamToolRenamer) filterNonChatFrame(raw string) (drop, handled bool) {
+	switch renamer.protocol {
+	case Anthropic:
+		if !strings.Contains(raw, "content_block") {
+			return false, false
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return false, false
+		}
+		index := fmt.Sprint(payload["index"])
+		switch jsonutil.StringAt(payload, "type") {
+		case "content_block_start":
+			block, _ := payload["content_block"].(map[string]any)
+			if block == nil {
+				return false, true
+			}
+			switch jsonutil.StringAt(block, "type") {
+			case "tool_use", "server_tool_use":
+				if renamer.renames.ShouldDrop(jsonutil.StringAt(block, "name")) {
+					renamer.droppedBlocks[index] = true
+					return true, true
+				}
+			}
+			return false, true
+		case "content_block_delta", "content_block_stop":
+			return renamer.droppedBlocks[index], true
+		}
+		return false, false
+	case Responses:
+		if !strings.Contains(raw, "output_item") && !strings.Contains(raw, "function_call_arguments") {
+			return false, false
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return false, false
+		}
+		switch jsonutil.StringAt(payload, "type") {
+		case "response.output_item.added":
+			item, _ := payload["item"].(map[string]any)
+			if item == nil {
+				return false, true
+			}
+			switch jsonutil.StringAt(item, "type") {
+			case "function_call", "custom_tool_call":
+				if renamer.renames.ShouldDrop(jsonutil.StringAt(item, "name")) {
+					if key := responseItemKey(payload, item); key != "" {
+						renamer.droppedBlocks[key] = true
+					}
+					return true, true
+				}
+			}
+			return false, true
+		case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.done":
+			key := responseItemKey(payload, nil)
+			return key != "" && renamer.droppedBlocks[key], true
+		}
+		return false, false
+	}
+	return false, false
+}
+
+// responseItemKey returns the stable key one Responses tool-call event uses to
+// refer to its item: the item id when present, else the output index.
+func responseItemKey(payload, item map[string]any) string {
+	if item != nil {
+		if id := jsonutil.StringAt(item, "id"); id != "" {
+			return "id:" + id
+		}
+		if index, ok := item["output_index"]; ok {
+			return "idx:" + fmt.Sprint(index)
+		}
+	}
+	if id := jsonutil.StringAt(payload, "item_id"); id != "" {
+		return "id:" + id
+	}
+	if index, ok := payload["output_index"]; ok {
+		return "idx:" + fmt.Sprint(index)
+	}
+	return ""
 }
 
 // rewriteChatFrame rewrites the tool names of one Chat chunk. Tool calls are
@@ -409,7 +514,7 @@ func (renamer *streamToolRenamer) rewriteChatFrame(raw string) []byte {
 					}
 				}
 				if arguments, exists := function["arguments"]; exists && !state.decided {
-					if renamer.renames.HasLongerPrefix(state.pending) {
+					if renamer.renames.HasLongerPrefix(state.pending) || renamer.renames.ManifestHasPrefix(state.pending) {
 						if fragment, ok := arguments.(string); ok {
 							state.pendingArguments.WriteString(fragment)
 							delete(function, "arguments")
@@ -428,6 +533,46 @@ func (renamer *streamToolRenamer) rewriteChatFrame(raw string) []byte {
 				}
 				if finished && !state.decided && (state.pending != "" || state.pendingArguments.Len() > 0) {
 					if renamer.finishState(state, function) {
+						changed = true
+					}
+				}
+			}
+		}
+		if renamer.renames.HasFilter() {
+			for _, container := range []string{"delta", "message"} {
+				message, _ := choice[container].(map[string]any)
+				if message == nil {
+					continue
+				}
+				if rawCalls, ok := message["tool_calls"].([]any); ok {
+					kept := make([]any, 0, len(rawCalls))
+					for callIndex, rawCall := range rawCalls {
+						call, _ := rawCall.(map[string]any)
+						key := fmt.Sprint(jsonutil.FirstAny(call["index"], jsonutil.StringAt(call, "id"), callIndex))
+						state := renamer.tools[key]
+						function, _ := call["function"].(map[string]any)
+						if state != nil && state.dropped {
+							changed = true
+							continue
+						}
+						if renamer.renames.ShouldDrop(jsonutil.StringAt(function, "name")) {
+							if state != nil {
+								state.dropped = true
+							}
+							changed = true
+							continue
+						}
+						kept = append(kept, rawCall)
+					}
+					if len(kept) == 0 {
+						delete(message, "tool_calls")
+					} else {
+						message["tool_calls"] = kept
+					}
+				}
+				if function, ok := message["function_call"].(map[string]any); ok {
+					if renamer.renames.ShouldDrop(jsonutil.StringAt(function, "name")) {
+						delete(message, "function_call")
 						changed = true
 					}
 				}
@@ -478,6 +623,10 @@ func (renamer *streamToolRenamer) releasePendingArguments(state *streamToolRenam
 // finishState settles a call the choice finished while its name was still
 // ambiguous: the held-back name and arguments are emitted verbatim.
 func (renamer *streamToolRenamer) finishState(state *streamToolRenameState, function map[string]any) bool {
+	if state.dropped {
+		state.decided = true
+		return false
+	}
 	changed := false
 	if state.pending != "" {
 		function["name"] = state.pending
@@ -499,7 +648,7 @@ func (renamer *streamToolRenamer) pendingCalls(choiceIndex any, skip map[string]
 			continue
 		}
 		state := renamer.tools[key]
-		if state == nil || state.decided || fmt.Sprint(state.choiceIndex) != fmt.Sprint(choiceIndex) {
+		if state == nil || state.dropped || state.decided || fmt.Sprint(state.choiceIndex) != fmt.Sprint(choiceIndex) {
 			continue
 		}
 		if state.pending == "" && state.pendingArguments.Len() == 0 {
@@ -540,7 +689,7 @@ func (renamer *streamToolRenamer) finish() []byte {
 	byIndex := map[string]*choiceCalls{}
 	for _, key := range renamer.order {
 		state := renamer.tools[key]
-		if state == nil || state.decided || state.pending == "" && state.pendingArguments.Len() == 0 {
+		if state == nil || state.dropped || state.decided || state.pending == "" && state.pendingArguments.Len() == 0 {
 			continue
 		}
 		index := state.choiceIndex
@@ -581,6 +730,9 @@ func (renamer *streamToolRenamer) finish() []byte {
 // written out as is. After a resolved rename, any further fragment is dropped,
 // because it belongs to a longer name the client never declared.
 func (renamer *streamToolRenamer) applyNameFragment(state *streamToolRenameState, function map[string]any, fragment string) bool {
+	if state.dropped {
+		return false
+	}
 	if state.decided {
 		if !state.renamed {
 			return false
@@ -599,7 +751,7 @@ func (renamer *streamToolRenamer) applyNameFragment(state *streamToolRenameState
 		state.decided, state.renamed = true, true
 		return true
 	}
-	if renamer.renames.HasLongerPrefix(state.pending) {
+	if renamer.renames.HasLongerPrefix(state.pending) || renamer.renames.ManifestHasPrefix(state.pending) {
 		// Still a prefix of a known wire name: hold the fragment until a later
 		// frame either completes the match or diverges.
 		delete(function, "name")
@@ -611,6 +763,9 @@ func (renamer *streamToolRenamer) applyNameFragment(state *streamToolRenameState
 	client, renamed := renamer.renames.Resolve(state.pending)
 	function["name"] = client
 	state.decided, state.renamed = true, renamed
+	if renamer.renames.ShouldDrop(state.pending) {
+		state.dropped = true
+	}
 	return true
 }
 

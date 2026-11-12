@@ -525,6 +525,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 	toolRenames := make([]*wire.ToolRenames, len(upstreams))
 	for i, baseURL := range upstreams {
 		preparedBodies[i], toolRenames[i] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
+		g.applyToolCallFilter(toolRenames[i])
 	}
 	for proxies < limit {
 		if ctx.Err() != nil {
@@ -1031,6 +1032,7 @@ func (g *Gateway) shapeKeyBody(body []byte, route models.Route, tier config.Tier
 		baseURL = g.cfg.Upstream.Go
 	}
 	shaped, renames := prepareAnonymousBody(body, route.ProtocolFor(tier), models.IsV1Upstream(baseURL))
+	g.applyToolCallFilter(renames)
 	return shaped, renames, !bytes.Equal(shaped, body)
 }
 

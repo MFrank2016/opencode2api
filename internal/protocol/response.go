@@ -526,7 +526,7 @@ func mayCarryToolName(body []byte) bool {
 // cannot contain a tool name; every rewrite is a map lookup after decoding.
 // Names that map to nothing are left alone.
 func RenameResponseTool(body []byte, protocol Protocol, renames *ToolRenames) []byte {
-	if renames.Empty() || len(body) == 0 {
+	if !renames.Active() || len(body) == 0 {
 		return body
 	}
 	if !mayCarryToolName(body) {
@@ -536,7 +536,14 @@ func RenameResponseTool(body []byte, protocol Protocol, renames *ToolRenames) []
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
 	}
-	if !renameToolInMap(payload, protocol, renames) {
+	changed := false
+	if filterToolCallsInMap(payload, protocol, renames) {
+		changed = true
+	}
+	if renameToolInMap(payload, protocol, renames) {
+		changed = true
+	}
+	if !changed {
 		return body
 	}
 	encoded, err := json.Marshal(payload)
@@ -544,6 +551,163 @@ func RenameResponseTool(body []byte, protocol Protocol, renames *ToolRenames) []
 		return body
 	}
 	return encoded
+}
+
+// filterToolCallsInMap removes tool calls the caller cannot execute, per the
+// filter recorded on renames. It reports whether the payload changed. A Chat
+// choice whose only calls were dropped has its finish_reason downgraded from
+// "tool_calls" to "stop" so the client does not wait for a call that is gone.
+func filterToolCallsInMap(payload map[string]any, protocol Protocol, renames *ToolRenames) bool {
+	if !renames.HasFilter() {
+		return false
+	}
+	changed := false
+	switch protocol {
+	case Chat:
+		for _, rawChoice := range jsonutil.SliceAt(payload, "choices") {
+			choice, _ := rawChoice.(map[string]any)
+			if choice == nil {
+				continue
+			}
+			dropped := false
+			for _, key := range []string{"message", "delta"} {
+				container, _ := choice[key].(map[string]any)
+				if container == nil {
+					continue
+				}
+				if rawCalls, ok := container["tool_calls"].([]any); ok {
+					kept := make([]any, 0, len(rawCalls))
+					for _, rawCall := range rawCalls {
+						call, _ := rawCall.(map[string]any)
+						function, _ := call["function"].(map[string]any)
+						name, _ := function["name"].(string)
+						if renames.ShouldDrop(name) {
+							changed, dropped = true, true
+							continue
+						}
+						kept = append(kept, rawCall)
+					}
+					if len(kept) == 0 {
+						delete(container, "tool_calls")
+					} else {
+						container["tool_calls"] = kept
+					}
+				}
+				if function, ok := container["function_call"].(map[string]any); ok {
+					name, _ := function["name"].(string)
+					if renames.ShouldDrop(name) {
+						delete(container, "function_call")
+						changed, dropped = true, true
+					}
+				}
+			}
+			if dropped && !hasChatToolCall(choice) && choice["finish_reason"] == "tool_calls" {
+				choice["finish_reason"] = "stop"
+				changed = true
+			}
+		}
+	case Responses:
+		if filterResponseOutput(payload, renames) {
+			changed = true
+		}
+		if response, ok := payload["response"].(map[string]any); ok {
+			if filterResponseOutput(response, renames) {
+				changed = true
+			}
+		}
+		if item, ok := payload["item"].(map[string]any); ok {
+			if filterResponseItem(item, renames) {
+				delete(payload, "item")
+				changed = true
+			}
+		}
+	case Anthropic:
+		if filterAnthropicContent(payload, renames) {
+			changed = true
+		}
+		if message, ok := payload["message"].(map[string]any); ok {
+			if filterAnthropicContent(message, renames) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func hasChatToolCall(choice map[string]any) bool {
+	for _, key := range []string{"message", "delta"} {
+		container, _ := choice[key].(map[string]any)
+		if container == nil {
+			continue
+		}
+		if len(jsonutil.SliceAt(container, "tool_calls")) > 0 {
+			return true
+		}
+		if _, ok := container["function_call"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func filterResponseOutput(container map[string]any, renames *ToolRenames) bool {
+	raw, ok := container["output"].([]any)
+	if !ok {
+		return false
+	}
+	kept := make([]any, 0, len(raw))
+	changed := false
+	for _, entry := range raw {
+		item, _ := entry.(map[string]any)
+		if item != nil && filterResponseItem(item, renames) {
+			changed = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if len(kept) == 0 {
+		delete(container, "output")
+	} else {
+		container["output"] = kept
+	}
+	return changed
+}
+
+func filterResponseItem(item map[string]any, renames *ToolRenames) bool {
+	switch jsonutil.StringAt(item, "type") {
+	case "function_call", "custom_tool_call":
+	default:
+		return false
+	}
+	return renames.ShouldDrop(jsonutil.StringAt(item, "name"))
+}
+
+func filterAnthropicContent(container map[string]any, renames *ToolRenames) bool {
+	raw, ok := container["content"].([]any)
+	if !ok {
+		return false
+	}
+	kept := make([]any, 0, len(raw))
+	changed := false
+	for _, entry := range raw {
+		block, _ := entry.(map[string]any)
+		if block != nil {
+			switch jsonutil.StringAt(block, "type") {
+			case "tool_use", "server_tool_use":
+				if renames.ShouldDrop(jsonutil.StringAt(block, "name")) {
+					changed = true
+					continue
+				}
+			}
+		}
+		kept = append(kept, entry)
+	}
+	if len(kept) == 0 {
+		delete(container, "content")
+	} else {
+		container["content"] = kept
+	}
+	return changed
 }
 
 // renameToolInMap rewrites aliased tool names in a decoded response or stream

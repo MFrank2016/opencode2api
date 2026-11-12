@@ -22,6 +22,34 @@ const clientToolDigestLength = 12
 // toolWireNameLimit is the longest tool name the upstreams accept.
 const toolWireNameLimit = 64
 
+// ToolCallFilter selects which upstream tool calls the gateway withholds from
+// the client because the client cannot execute them.
+type ToolCallFilter int
+
+const (
+	// FilterOff keeps every call (the historical behavior).
+	FilterOff ToolCallFilter = iota
+	// FilterManifestOnly drops an official/manifest tool call when the caller
+	// declared no equivalent. Names the model invented are kept.
+	FilterManifestOnly
+	// FilterUnoffered drops any call the caller did not declare, including
+	// names the model invented.
+	FilterUnoffered
+)
+
+// ParseToolCallFilter maps the configuration spelling to a filter. Unknown
+// values fall back to off so a typo cannot silently change response bodies.
+func ParseToolCallFilter(value string) ToolCallFilter {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "manifest-only", "manifest_only", "manifest":
+		return FilterManifestOnly
+	case "unoffered", "strict":
+		return FilterUnoffered
+	default:
+		return FilterOff
+	}
+}
+
 // ToolRenames records the client-to-wire tool names of one shaped request. The
 // zero value and a nil pointer are both empty and safe to use.
 type ToolRenames struct {
@@ -33,6 +61,12 @@ type ToolRenames struct {
 	// name is never guessed between.
 	byCase  map[string]string
 	byShape map[string]string
+	// manifest is every official name appended for the lane, and declared is
+	// every client tool the callers declared. filter selects the reply-side
+	// policy that uses them.
+	manifest map[string]bool
+	declared map[string]bool
+	filter   ToolCallFilter
 }
 
 // NewToolRenames returns an empty rename set.
@@ -49,6 +83,93 @@ func NewToolRenames() *ToolRenames {
 // Empty reports whether no tool was renamed.
 func (r *ToolRenames) Empty() bool {
 	return r == nil || len(r.toWire) == 0
+}
+
+// Active reports whether the response side must touch this body: either a
+// client tool was renamed or a reply-side filter is enabled. Unlike Empty it
+// stays true for a shaped request whose caller declared no tools, because the
+// manifest filter must still drop unrunnable official calls.
+func (r *ToolRenames) Active() bool {
+	return r != nil && (len(r.toWire) > 0 || r.filter != FilterOff)
+}
+
+// HasFilter reports whether reply-side tool-call filtering is enabled.
+func (r *ToolRenames) HasFilter() bool {
+	return r != nil && r.filter != FilterOff
+}
+
+// SetManifest records the official tool names appended for this lane.
+func (r *ToolRenames) SetManifest(names []string) {
+	if r == nil {
+		return
+	}
+	r.manifest = make(map[string]bool, len(names))
+	for _, name := range names {
+		if name != "" {
+			r.manifest[name] = true
+		}
+	}
+}
+
+// SetDeclared records the client tool names the caller declared.
+func (r *ToolRenames) SetDeclared(names []string) {
+	if r == nil {
+		return
+	}
+	r.declared = make(map[string]bool, len(names))
+	for _, name := range names {
+		if name != "" {
+			r.declared[name] = true
+		}
+	}
+}
+
+// SetFilter enables reply-side tool-call filtering.
+func (r *ToolRenames) SetFilter(filter ToolCallFilter) {
+	if r == nil {
+		return
+	}
+	r.filter = filter
+}
+
+// ShouldDrop reports whether a tool name the upstream returned cannot be
+// executed by the caller under the configured filter. A renamed client tool, a
+// bound official alias, or a declared client name is always kept.
+func (r *ToolRenames) ShouldDrop(name string) bool {
+	if r == nil || r.filter == FilterOff || name == "" {
+		return false
+	}
+	if _, ok := r.Client(name); ok {
+		return false
+	}
+	if _, ok := r.Official(name); ok {
+		return false
+	}
+	if r.declared[name] {
+		return false
+	}
+	if resolved, _ := r.Resolve(name); resolved != name {
+		return false
+	}
+	if r.manifest[name] {
+		return true
+	}
+	return r.filter == FilterUnoffered
+}
+
+// ManifestHasPrefix reports whether any official name starts with prefix and is
+// longer. A Chat stream uses it to hold a partial name back until the next
+// chunk resolves it, so a manifest-only drop never leaks a name fragment.
+func (r *ToolRenames) ManifestHasPrefix(prefix string) bool {
+	if r == nil || prefix == "" || !r.HasFilter() {
+		return false
+	}
+	for name := range r.manifest {
+		if len(name) > len(prefix) && strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Count reports how many client tools were renamed.
