@@ -160,27 +160,30 @@ type SecretInput struct {
 // value or the ID of the existing one. The WebUI username and password are
 // not changed here; they go through /api/account.
 type ConfigUpdate struct {
-	Listen        string                   `json:"listen"`
-	ServerKeys    []SecretInput            `json:"server_keys"`
-	ZenKeys       []SecretInput            `json:"zen_keys"`
-	GoKeys        []SecretInput            `json:"go_keys"`
-	Anonymous     bool                     `json:"anonymous"`
-	Warp          config.WarpConfig        `json:"warp"`
-	Proxies       []SecretInput            `json:"proxies"`
-	ProxyFile     string                   `json:"proxyfile"`
-	ProxyBindings map[string]string        `json:"proxy_bindings,omitempty"`
-	Upstream      config.UpstreamConfig    `json:"upstream"`
-	Retry         config.RetryConfig       `json:"retry"`
-	Models        config.ModelsConfig      `json:"models"`
-	Performance   config.PerformanceConfig `json:"performance"`
-	Logging       config.LoggingConfig     `json:"logging"`
-	Prefer        config.Tier              `json:"prefer"`
+	Listen     string        `json:"listen"`
+	ServerKeys []SecretInput `json:"server_keys"`
+	ZenKeys    []SecretInput `json:"zen_keys"`
+	GoKeys     []SecretInput `json:"go_keys"`
+	Anonymous  bool          `json:"anonymous"`
+	// Nested blocks are raw so a partial payload (an older WebUI, or a client
+	// that edits one field) merges over the current configuration instead of
+	// zeroing the fields it omitted.
+	Warp          json.RawMessage   `json:"warp"`
+	Proxies       []SecretInput     `json:"proxies"`
+	ProxyFile     string            `json:"proxyfile"`
+	ProxyBindings map[string]string `json:"proxy_bindings,omitempty"`
+	Upstream      json.RawMessage   `json:"upstream"`
+	Retry         json.RawMessage   `json:"retry"`
+	Models        json.RawMessage   `json:"models"`
+	Performance   json.RawMessage   `json:"performance"`
+	Logging       json.RawMessage   `json:"logging"`
+	Prefer        config.Tier       `json:"prefer"`
 	// A pointer distinguishes an omitted field (legacy clients should keep the
 	// current reasoning configuration) from an explicit empty object (clear it).
-	Reasoning *config.ReasoningConfig   `json:"reasoning,omitempty"`
-	WebUI     WebUIView                 `json:"webui"`
-	Metrics   config.MetricsConfig      `json:"metrics"`
-	Identity  config.IdentityPoolConfig `json:"identity"`
+	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
+	WebUI     WebUIView               `json:"webui"`
+	Metrics   json.RawMessage         `json:"metrics"`
+	Identity  json.RawMessage         `json:"identity"`
 }
 
 // handleGetConfig answers with the current configuration, secrets masked.
@@ -228,16 +231,56 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if update.ProxyBindings != nil {
 		proxyBindings = update.ProxyBindings
 	}
+	warp, err := mergeBlockInto(current.Warp, update.Warp)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_warp", err.Error())
+		return
+	}
+	upstream, err := mergeBlockInto(current.Upstream, update.Upstream)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_upstream", err.Error())
+		return
+	}
+	retry, err := mergeBlockInto(current.Retry, update.Retry)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_retry", err.Error())
+		return
+	}
+	models, err := mergeModelsBlock(update.Models, current.Models)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_models", err.Error())
+		return
+	}
+	performance, err := mergeBlockInto(current.Performance, update.Performance)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_performance", err.Error())
+		return
+	}
+	logging, err := mergeBlockInto(current.Logging, update.Logging)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_logging", err.Error())
+		return
+	}
+	metrics, err := mergeBlockInto(current.Metrics, update.Metrics)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_metrics", err.Error())
+		return
+	}
+	identity, err := mergeBlockInto(current.Identity, update.Identity)
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_identity", err.Error())
+		return
+	}
 	candidate := config.Config{
 		ServerKeyMetadata: current.ServerKeyMetadata,
 		Rotation:          current.Rotation,
-		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Warp: update.Warp, Proxies: proxies, ProxyFile: update.ProxyFile,
+		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Warp: warp, Proxies: proxies, ProxyFile: update.ProxyFile,
 		ProxyBindings: proxyBindings,
-		Upstream:      update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
+		Upstream:      upstream, Retry: retry, Models: models, Performance: performance, Logging: logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
-		Metrics:   update.Metrics,
-		Identity:  update.Identity,
+		Metrics:   metrics,
+		Identity:  identity,
 	}
 	result, err := a.manager.Apply(candidate, true)
 	if err != nil {
